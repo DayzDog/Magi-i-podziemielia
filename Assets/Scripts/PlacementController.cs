@@ -1,35 +1,107 @@
-using UnityEngine;
+п»їusing UnityEngine;
 
 public class PlacementController : MonoBehaviour
 {
+    [Header("Р”РёР°РіРЅРѕСЃС‚РёРєР°")]
+    [SerializeField] private bool autoStartOnPlay = false;   // в†ђ РіР°Р»РѕС‡РєСѓ РїРѕСЃС‚Р°РІРёРј РІ РёРЅСЃРїРµРєС‚РѕСЂРµ
+    [SerializeField] private TileDefinition autoStartDef;     // в†ђ СЃСЋРґР° Р±СЂРѕСЃСЊ Р»СЋР±РѕР№ TileDefinition
     public static PlacementController Instance { get; private set; }
 
-    [Header("Raycast по клеткам")]
-    public LayerMask cellMask;              // сюда назначь слой BoardCell
+    [Header("Raycast РїРѕ РєР»РµС‚РєР°Рј")]
+    public LayerMask cellMask;              // СЃР»РѕР№ BoardCell
 
-    [Header("Материалы превью (если в TileDefinition не задан свой)")]
-    public Material validMat;               // можно ставить
-    public Material invalidMat;             // нельзя ставить
+    [Header("РњР°С‚РµСЂРёР°Р»С‹ РїСЂРµРІСЊСЋ (РµСЃР»Рё РІ TileDefinition РЅРµ Р·Р°РґР°РЅ СЃРІРѕР№)")]
+    public Material validMat;               // РјРѕР¶РЅРѕ СЃС‚Р°РІРёС‚СЊ
+    public Material invalidMat;             // РЅРµР»СЊР·СЏ СЃС‚Р°РІРёС‚СЊ
 
-    [Header("Управление")]
-    public KeyCode rotateCW = KeyCode.E;   // повернуть на +90°
-    public KeyCode rotateCCW = KeyCode.Q;   // повернуть на -90°
+    [Header("РЈРїСЂР°РІР»РµРЅРёРµ")]
+    public KeyCode rotateCW = KeyCode.E;   // +90В°
+    public KeyCode rotateCCW = KeyCode.Q;   // -90В°
 
-    // текущее состояние
+    [Header("РљР°РєР°СЏ РєР°РјРµСЂР° СЃС‡РёС‚С‹РІР°РµС‚ РєСѓСЂСЃРѕСЂ")]
+    [SerializeField] private Camera inputCamera; // РїРµСЂРµС‚Р°С‰Рё СЃСЋРґР° СЃРІРѕСЋ РєР°РјРµСЂСѓ РІ РёРЅСЃРїРµРєС‚РѕСЂРµ (РёР»Рё РїРѕРјРµС‚СЊ РµС‘ MainCamera)
+
+    // С‚РµРєСѓС‰РµРµ СЃРѕСЃС‚РѕСЏРЅРёРµ
     private TileDefinition _def;
     private GameObject _previewGO;
     private GameObject _prefab;
     private Quaternion _rot = Quaternion.identity;
-    private Camera _cam;
 
     void Awake()
     {
         if (Instance != null) { Destroy(gameObject); return; }
         Instance = this;
-        _cam = Camera.main;
+
+        if (inputCamera == null) inputCamera = Camera.main;
+        if (inputCamera == null)
+            Debug.LogError("[Placement] РќРµ РЅР°Р·РЅР°С‡РµРЅР° РєР°РјРµСЂР°! РџРµСЂРµС‚Р°С‰Рё РєР°РјРµСЂСѓ РІ РїРѕР»Рµ 'Input Camera' Сѓ PlacementController.");
+        else
+            Debug.Log("[Placement] РСЃРїРѕР»СЊР·СѓРµРј РєР°РјРµСЂСѓ: " + inputCamera.name);
     }
 
-    // Вызываем, когда игрок кликнул по карточке
+    void Update()
+    {
+        if (_previewGO == null || inputCamera == null) return;
+
+        // РІСЂР°С‰РµРЅРёРµ РїСЂРµРІСЊСЋ
+        if (Input.GetKeyDown(rotateCW)) _rot *= Quaternion.Euler(0, 90, 0);
+        if (Input.GetKeyDown(rotateCCW)) _rot *= Quaternion.Euler(0, -90, 0);
+
+        // Р»СѓС‡ РёР· РєР°РјРµСЂС‹ РїРѕРґ РєСѓСЂСЃРѕСЂ
+        Ray ray = inputCamera.ScreenPointToRay(Input.mousePosition);
+        Debug.DrawRay(ray.origin, ray.direction * 100f, Color.cyan);
+
+        if (Physics.Raycast(ray, out var hit, 500f, cellMask, QueryTriggerInteraction.Ignore))
+        {
+            var cell = hit.collider.GetComponentInParent<BoardCell>();
+            if (cell != null)
+            {
+                bool canPlace = !cell.occupied;
+
+                Vector3 pos = cell.WorldSnapPoint + _def.previewYOffset;
+                _previewGO.transform.SetPositionAndRotation(pos, _rot);
+
+                // РµСЃР»Рё РІ TileDefinition РЅРµС‚ СЃРІРѕРµРіРѕ РјР°С‚РµСЂРёР°Р»Р° ghost вЂ” РїРѕРґСЃРІРµС‚РёРј РІР°Р»РёРґРЅРѕСЃС‚СЊ
+                if (_def.previewMaterial == null)
+                    ApplyMaterialToAll(_previewGO, canPlace ? validMat : invalidMat);
+
+                // РїРѕСЃС‚Р°РІРёС‚СЊ
+                if (canPlace && Input.GetMouseButtonDown(0))
+                {
+                    var obj = Instantiate(_prefab, cell.WorldSnapPoint, _rot);
+                    foreach (var c in obj.GetComponentsInChildren<Collider>()) c.enabled = true;
+
+                    // РїСЂРёРІСЏР·Р°С‚СЊ Рє РєР»РµС‚РєРµ вЂ” СѓРґРѕР±РЅРѕ РґР»СЏ СѓР±РѕСЂРєРё/СЃРѕС…СЂР°РЅРµРЅРёР№
+                    obj.transform.SetParent(cell.transform, worldPositionStays: true);
+                    cell.SetOccupant(obj.transform);
+                }
+            }
+        }
+
+        // РѕС‚РјРµРЅР°
+        if (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Escape))
+            CancelPlacement();
+    }
+    void Start()
+    {
+        if (autoStartOnPlay && autoStartDef != null)
+        {
+            Debug.Log("[Placement] AutoStart BeginPlacement(" + autoStartDef.name + ")");
+            BeginPlacement(autoStartDef);
+        }
+        else if (autoStartOnPlay)
+        {
+            Debug.LogError("[Placement] AutoStart РІРєР»СЋС‡С‘РЅ, РЅРѕ autoStartDef РїСѓСЃС‚.");
+        }
+
+        if ((cellMask.value) == 0)
+            Debug.LogWarning("[Placement] cellMask РїСѓСЃС‚. РќР°Р·РЅР°С‡СЊ СЃР»РѕР№ BoardCell.");
+    }
+
+
+    // ==== РџРЈР‘Р›РР§РќР«Р• API ====
+
+    // РІС‹Р·С‹РІР°РµС‚ РєР°СЂС‚РѕС‡РєР°, РєРѕРіРґР° РёРіСЂРѕРє РєР»РёРєРЅСѓР» РїРѕ РЅРµР№
     public void BeginPlacement(TileDefinition def)
     {
         CancelPlacement();
@@ -38,15 +110,23 @@ public class PlacementController : MonoBehaviour
         _prefab = def.tilePrefab;
         _rot = Quaternion.identity;
 
+        if (_prefab == null)
+        {
+            Debug.LogError("[Placement] tilePrefab РІ TileDefinition РЅРµ Р·Р°РґР°РЅ!");
+            return;
+        }
+
         _previewGO = Instantiate(_prefab);
         _previewGO.name = _prefab.name + "_Preview";
 
-        // превью не должно толкаться/блокировать
+        // РїСЂРµРІСЊСЋ РЅРµ РґРѕР»Р¶РЅРѕ РјРµС€Р°С‚СЊ РєР»РёРєР°Рј
         foreach (var c in _previewGO.GetComponentsInChildren<Collider>()) c.enabled = false;
 
-        // если в дефинишене задан свой полупрозрачный материал — применим
+        // РїСЂРёРјРµРЅРёРј ghost-РјР°С‚РµСЂРёР°Р», РµСЃР»Рё СѓРєР°Р·Р°РЅ РІ РґРµС„РёРЅРёС€РµРЅРµ
         if (_def.previewMaterial != null)
             ApplyMaterialToAll(_previewGO, _def.previewMaterial);
+
+        Debug.Log("[Placement] РќР°С‡Р°Р»Рё СЂР°Р·РјРµС‰РµРЅРёРµ: " + _prefab.name);
     }
 
     public void CancelPlacement()
@@ -55,56 +135,9 @@ public class PlacementController : MonoBehaviour
         _previewGO = null;
         _prefab = null;
         _def = null;
-        
     }
 
-    void Update()
-    {
-        if (_previewGO == null) return;
-
-        // вращение превью
-        if (Input.GetKeyDown(rotateCW)) _rot *= Quaternion.Euler(0, 90, 0);
-        if (Input.GetKeyDown(rotateCCW)) _rot *= Quaternion.Euler(0, -90, 0);
-
-        // луч из камеры под курсор
-        var ray = _cam.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out var hit, 500f, cellMask, QueryTriggerInteraction.Ignore))
-        {
-            // нашли клетку
-            var cell = hit.collider.GetComponentInParent<BoardCell>();
-            if (cell != null)
-            {
-                bool canPlace = !cell.occupied;
-
-                // позиция превью = точка привязки клетки + маленький подъём
-                Vector3 pos = cell.WorldSnapPoint + _def.previewYOffset;
-                _previewGO.transform.SetPositionAndRotation(pos, _rot);
-
-                // если в TileDefinition нет своего материала ghost — подсветим валидность
-                if (_def.previewMaterial == null)
-                    ApplyMaterialToAll(_previewGO, canPlace ? validMat : invalidMat);
-
-                // поставить
-                if (canPlace && Input.GetMouseButtonDown(0))
-                {
-                    var obj = Instantiate(_prefab, cell.WorldSnapPoint, _rot);
-                    foreach (var c in obj.GetComponentsInChildren<Collider>()) c.enabled = true;
-
-                    // прикрепим к клетке для удобства
-                    obj.transform.SetParent(cell.transform, worldPositionStays: true);
-                    cell.SetOccupant(obj.transform);
-
-                    // хотим ставить серией — оставляем превью.
-                    // если нужно одноразово — раскомментируй:
-                    // CancelPlacement();
-                }
-            }
-        }
-
-        // отменить размещение
-        if (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Escape))
-            CancelPlacement();
-    }
+    // ==== Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќРћР• ====
 
     private void ApplyMaterialToAll(GameObject go, Material m)
     {
@@ -117,5 +150,3 @@ public class PlacementController : MonoBehaviour
         }
     }
 }
-
-
