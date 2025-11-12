@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 422fd13c7a91f424abb0aa8c48f2dc7a, type: 3}
   m_Name: An_room_tile
   m_EditorClassIdentifier: Assembly-CSharp::TileDefinition
-  tilePrefab: {fileID: -5965236920940794144, guid: 443d648c742cbfd4cb5cfed645e9f067, type: 3}
+  tilePrefab: {fileID: 919132149155446097, guid: 1d0a1965873bac14c8998b014bb65486, type: 3}
   previewMaterial: {fileID: -876546973899608171, guid: c1ca4d229a5d13145b0669171d7d2e3f, type: 3}
   previewYOffset: {x: 0, y: 0.01, z: 0}
