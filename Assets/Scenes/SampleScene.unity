@@ -1383,6 +1383,7 @@ MonoBehaviour:
   dragHeight: 0.1
   rotateLeftKey: 113
   rotateRightKey: 101
+  hoverCardAlpha: 0.3
 --- !u!65 &972713091
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1676,6 +1677,8 @@ MonoBehaviour:
   crossTile: {fileID: 0}
   tilePositionOffset: {x: 0, y: 0, z: 0}
   baseRotationY: 0
+  previewCanColor: {r: 0, g: 1, b: 0, a: 0.5}
+  previewCantColor: {r: 1, g: 0, b: 0, a: 0.5}
 --- !u!65 &1236805300
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1974,6 +1977,7 @@ MonoBehaviour:
   dragHeight: 0.1
   rotateLeftKey: 113
   rotateRightKey: 101
+  hoverCardAlpha: 0.3
 --- !u!65 &1544801637
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2087,6 +2091,7 @@ MonoBehaviour:
   dragHeight: 0.1
   rotateLeftKey: 113
   rotateRightKey: 101
+  hoverCardAlpha: 0.3
 --- !u!65 &1589704506
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2457,6 +2462,7 @@ MonoBehaviour:
   dragHeight: 0.1
   rotateLeftKey: 113
   rotateRightKey: 101
+  hoverCardAlpha: 0.3
 --- !u!65 &1825375669
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2622,6 +2628,7 @@ MonoBehaviour:
   dragHeight: 0.1
   rotateLeftKey: 113
   rotateRightKey: 101
+  hoverCardAlpha: 0
 --- !u!65 &1945444054
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -3003,6 +3010,7 @@ MonoBehaviour:
   dragHeight: 0.1
   rotateLeftKey: 113
   rotateRightKey: 101
+  hoverCardAlpha: 0.3
 --- !u!65 &2131523835
 BoxCollider:
   m_ObjectHideFlags: 0

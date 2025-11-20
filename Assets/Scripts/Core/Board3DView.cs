@@ -3,14 +3,23 @@ using UnityEngine;
 public class Board3DView : MonoBehaviour
 {
     [Header("Tile defs")]
-    public TileDefinition crossTile; // временно только крест для теста
+    public TileDefinition crossTile; // пока что можешь игнорировать, мы используем tileDef из карты
 
     [Header("Выровнять тайл относительно клетки")]
     public Vector3 tilePositionOffset = Vector3.zero; // сдвиг относительно anchor
     public float baseRotationY = 0f;                  // базовый поворот для Rotation.R0
 
+    [Header("Превью тайла")]
+    public Color previewCanColor = new Color(0f, 1f, 0f, 0.5f);
+    public Color previewCantColor = new Color(1f, 0f, 0f, 0.5f);
+
     private BoardModel board;
     private Transform[,] anchors = new Transform[BoardModel.Width, BoardModel.Height];
+
+    // данные для призрачного тайла
+    private GameObject previewGO;
+    private Renderer[] previewRenderers;
+    private TileDefinition previewDef; // какой деф сейчас визуализируем
 
     private void Awake()
     {
@@ -31,40 +40,36 @@ public class Board3DView : MonoBehaviour
     }
 
     /// <summary>
-    /// Попытаться поставить тайл на клетку (x,y) по правилам.
-    /// Возвращает true, если всё ок.
+    /// Проверка, можно ли поставить тайл на клетку, без изменения модели.
+    /// </summary>
+    public bool CanPlaceTile(TileDefinition def, Rotation rot, int x, int y)
+    {
+        if (def == null)
+            return false;
+
+        if (!board.IsInside(x, y))
+            return false;
+
+        if (board.Get(x, y) != null)
+            return false;
+
+        return PlacementValidator.CanPlace(board, x, y, def, rot);
+    }
+
+    /// <summary>
+    /// Попытаться поставить тайл по правилам; при успехе обновляет модель и спавнит реальный тайл.
     /// </summary>
     public bool TryPlaceTile(TileDefinition def, Rotation rot, int x, int y)
     {
-        if (def == null)
-        {
-            Debug.LogError("TryPlaceTile: def == null");
-            return false;
-        }
-
-        if (!board.IsInside(x, y))
-        {
-            Debug.LogWarning($"TryPlaceTile: ({x},{y}) вне поля");
-            return false;
-        }
-
-        if (board.Get(x, y) != null)
-        {
-            Debug.Log($"TryPlaceTile: клетка ({x},{y}) уже занята");
-            return false;
-        }
-
-        bool canPlace = PlacementValidator.CanPlace(board, x, y, def, rot);
-        Debug.Log($"TryPlaceTile: CanPlace({x},{y}) = {canPlace}");
-
-        if (!canPlace)
+        if (!CanPlaceTile(def, rot, x, y))
             return false;
 
-        // записываем в модель
         board.Set(x, y, new TileInstance(def, rot));
-
-        // рисуем в мире
         SpawnTileWorld(def, rot, x, y);
+
+        // после реального размещения убираем призрак (если был)
+        HidePreview();
+
         return true;
     }
 
@@ -72,7 +77,7 @@ public class Board3DView : MonoBehaviour
     {
         if (def.WorldPrefab == null)
         {
-            Debug.LogError("У TileDefinition нет WorldPrefab! Проверь Tile_Cross.");
+            Debug.LogError("У TileDefinition нет WorldPrefab! Проверь TileDefinition.");
             return;
         }
 
@@ -83,14 +88,74 @@ public class Board3DView : MonoBehaviour
             return;
         }
 
-        // спауним префаб прямо в точку клетки
         var go = Instantiate(def.WorldPrefab, anchor.position, Quaternion.identity, transform);
 
-        // Общий поворот: базовый угол + угол по Rotation (0,90,180,270)
         float yRot = baseRotationY + (int)rot;
         go.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
-
-        // Дополнительный сдвиг (если pivot не в центре клетки)
         go.transform.position += go.transform.TransformVector(tilePositionOffset);
+    }
+
+    /// <summary>
+    /// Обновляет/показывает призрачный тайл на клетке (x,y).
+    /// </summary>
+    public void UpdatePreview(TileDefinition def, Rotation rot, int x, int y, bool canPlace)
+    {
+        if (def == null || !board.IsInside(x, y))
+        {
+            HidePreview();
+            return;
+        }
+
+        var anchor = anchors[x, y];
+        if (anchor == null)
+        {
+            HidePreview();
+            return;
+        }
+
+        // если нет превью или деф сменился – создаём новый призрак
+        if (previewGO == null || previewDef != def)
+        {
+            if (previewGO != null)
+                Destroy(previewGO);
+
+            previewGO = Instantiate(def.WorldPrefab, anchor.position, Quaternion.identity, transform);
+            previewRenderers = previewGO.GetComponentsInChildren<Renderer>();
+            previewDef = def;
+        }
+
+        // позиция и поворот такие же, как у реального тайла
+        previewGO.transform.position = anchor.position;
+
+        float yRot = baseRotationY + (int)rot;
+        previewGO.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
+        previewGO.transform.position += previewGO.transform.TransformVector(tilePositionOffset);
+
+        // цвет в зависимости от валидности
+        Color c = canPlace ? previewCanColor : previewCantColor;
+
+        if (previewRenderers != null)
+        {
+            foreach (var r in previewRenderers)
+            {
+                if (r == null) continue;
+                // renderer.material создаёт копию материала для этого инстанса — для прототипа норм
+                if (r.material.HasProperty("_Color"))
+                {
+                    var col = c;
+                    r.material.color = col;
+                }
+            }
+        }
+
+        previewGO.SetActive(true);
+    }
+
+    public void HidePreview()
+    {
+        if (previewGO != null)
+        {
+            previewGO.SetActive(false);
+        }
     }
 }
