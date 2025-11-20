@@ -15,6 +15,7 @@ public class DraggableCardTile : MonoBehaviour
     private Quaternion startRot;
     private Rotation currentRotation = Rotation.R0;
     private Camera mainCam;
+    private float dragPlaneY;
 
     private void Awake()
     {
@@ -50,12 +51,14 @@ public class DraggableCardTile : MonoBehaviour
             return; // дальше код только дл€ уже тащащейс€ карты
         }
 
-        // ≈—Ћ» “јў»ћ Ц двигаем карту за мышью
+        // ≈—Ћ» “јў»ћ Ц двигаем карту за мышью по плоскости
         Ray dragRay = mainCam.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(dragRay, out RaycastHit dragHit, 100f))
+        Plane dragPlane = new Plane(Vector3.up, new Vector3(0f, dragPlaneY, 0f));
+
+        if (dragPlane.Raycast(dragRay, out float enter))
         {
-            Vector3 pos = dragHit.point;
-            pos.y = startPos.y + dragHeight;
+            Vector3 pos = dragRay.GetPoint(enter);
+            pos.y = dragPlaneY + dragHeight; // чуть приподн€ть над плоскостью
             transform.position = pos;
         }
 
@@ -95,6 +98,7 @@ public class DraggableCardTile : MonoBehaviour
 
         isDragging = true;
         startPos = transform.position;
+        dragPlaneY = startPos.y; // по этой высоте будем т€нуть карту
         startRot = transform.rotation;
         currentRotation = Rotation.R0;
     }
