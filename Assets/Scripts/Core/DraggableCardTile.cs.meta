@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: 153f50d05b28cd1458a4dae171c85236
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - tileDef: {instanceID: 0}
+  - boardView: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
