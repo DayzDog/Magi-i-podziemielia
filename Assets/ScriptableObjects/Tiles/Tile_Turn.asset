@@ -12,11 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 067a8c3905b7bf84abeb3706a5db06cf, type: 3}
   m_Name: Tile_Turn
   m_EditorClassIdentifier: Assembly-CSharp::TileDefinition
-  Type: 2
-  Sprite: {fileID: 0}
-  WorldPrefab: {fileID: 919132149155446097, guid: 8b8a04858c57fb640b78b559805913d8, type: 3}
-  BaseSockets:
+  tileType: 0
+  baseSockets:
     Up: 1
     Right: 1
     Down: 0
     Left: 0
+  WorldPrefab: {fileID: 6355378746757831586, guid: 5089a4e307b51a04ba103779957d222d, type: 3}

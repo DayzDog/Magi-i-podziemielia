@@ -12,11 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 067a8c3905b7bf84abeb3706a5db06cf, type: 3}
   m_Name: Tile_Cross
   m_EditorClassIdentifier: Assembly-CSharp::TileDefinition
-  Type: 0
-  Sprite: {fileID: 0}
-  WorldPrefab: {fileID: 919132149155446097, guid: 73ffb5f8f9219d24081e7e020b8c007c, type: 3}
-  BaseSockets:
+  tileType: 0
+  baseSockets:
     Up: 1
     Right: 1
     Down: 1
     Left: 1
+  WorldPrefab: {fileID: 8075305001007707150, guid: 5ef7c0f80c6a48d4684281977f221749, type: 3}

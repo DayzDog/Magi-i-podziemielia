@@ -1,79 +1,73 @@
 ﻿using UnityEngine;
+using System;
 
 public static class PlacementValidator
 {
-    /// <summary>
-    /// Правила:
-    /// 1) Клетка пустая.
-    /// 2) Любой соседний тайл, если существует, должен стыковаться путь↔путь (оба true).
-    /// 3) Должен хотя бы к чему-то примыкать:
-    ///    - либо к существующему тайлу,
-    ///    - либо к виртуальному старту (x=2,y=0) через Down.
-    /// 4) Новый тайл должен подключаться к компоненту, достижимому от старта (не создаём “островов”).
-    /// </summary>
-    public static bool CanPlace(BoardModel board, int x, int y, TileDefinition def, Rotation rot)
+    public static bool CanPlace(BoardModel board, int x, int y,
+                                TileDefinition def, Rotation rot)
     {
-        // 1) Клетка должна быть внутри поля и пустой
-        if (!board.IsInside(x, y) || !board.IsEmpty(x, y))
+        if (def == null)
             return false;
 
-        var sockets = def.GetSockets(rot);
-
-        bool hasNeighbor = false;
-        bool touchesVirtualStart = (x == 2 && y == 0 && sockets.Down);
-
-        // 2) Проверка стыковки со всеми соседями
-        foreach (Side side in System.Enum.GetValues(typeof(Side)))
-        {
-            var off = side.Offset();
-            int nx = x + off.x;
-            int ny = y + off.y;
-
-            if (!board.IsInside(nx, ny)) continue;
-
-            var neighbor = board.Get(nx, ny);
-            if (neighbor == null) continue;
-
-            hasNeighbor = true;
-
-            var myOut = sockets.Get(side);
-            var nbOut = neighbor.Def.GetSockets(neighbor.Rot)
-                                    .Get(SideUtil.Opposite(side));
-
-            // Должно быть путь↔путь, иначе ставить нельзя
-            if (!(myOut && nbOut))
-                return false;
-        }
-
-        // Если нет соседей и нет связи с виртуальным стартом — нельзя
-        if (!hasNeighbor && !touchesVirtualStart)
+        // клетка должна быть внутри поля
+        if (!board.IsInside(x, y))
             return false;
 
-        // 3) Проверка подключения к уже достижимой от старта области
-        var reachable = board.ComputeReachableFromStart();
-        bool connectsToReachable = touchesVirtualStart; // прямое соединение со стартом
+        // и пустой
+        if (!board.IsEmpty(x, y))
+            return false;
 
-        foreach (Side side in System.Enum.GetValues(typeof(Side)))
+        // сокеты кандидата с учётом текущего поворота
+        Sockets candidateSockets = def.GetSockets(rot);
+
+        bool hasConnection = false; // есть ли хотя бы одно соединение path–path
+
+        // проверяем всех четырёх соседей
+        foreach (Side side in Enum.GetValues(typeof(Side)))
         {
-            var off = side.Offset();
-            int nx = x + off.x;
-            int ny = y + off.y;
+            Vector2Int offset = side.Offset();
+            int nx = x + offset.x;
+            int ny = y + offset.y;
 
-            if (!board.IsInside(nx, ny)) continue;
-            if (!reachable[nx, ny]) continue;
+            // край поля игнорируем (подземелье обрезано рамкой)
+            if (!board.IsInside(nx, ny))
+                continue;
 
-            var neighbor = board.Get(nx, ny);
-            if (neighbor == null) continue;
+            TileInstance neighbor = board.Get(nx, ny);
+            if (neighbor == null)
+                continue;
 
-            var nbSockets = neighbor.Def.GetSockets(neighbor.Rot);
+            bool ourEdge = candidateSockets.Get(side);
+            Side opposite = SideUtil.Opposite(side);
+            bool theirEdge = neighbor.Connections.Get(opposite);
 
-            if (sockets.Get(side) && nbSockets.Get(SideUtil.Opposite(side)))
+            // ПРАВИЛО 1: путь–стена / стена–путь — нельзя
+            if (ourEdge != theirEdge)
             {
-                connectsToReachable = true;
-                break;
+                return false;
+            }
+
+            // путь–путь — считаем это реальным соединением
+            if (ourEdge && theirEdge)
+            {
+                hasConnection = true;
             }
         }
 
-        return connectsToReachable;
+        // ПРАВИЛО 2: либо есть хотя бы одно соединение,
+        // либо это ПЕРВЫЙ тайл над стартовым полем.
+        bool isFirstFromStart = false;
+
+        // у нас старт находится под клеткой (2,0),
+        // и у стартового тайла путь ВВЕРХ, значит у первого тайла
+        // в (2,0) должен быть путь ВНИЗ
+        if (x == 2 && y == 0)
+        {
+            if (candidateSockets.Down)
+                isFirstFromStart = true;
+        }
+
+        // обычным тайлам без соединения — НЕЛЬЗЯ
+        return hasConnection || isFirstFromStart;
     }
 }

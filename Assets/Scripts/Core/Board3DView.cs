@@ -3,23 +3,25 @@ using UnityEngine;
 public class Board3DView : MonoBehaviour
 {
     [Header("Tile defs")]
-    public TileDefinition crossTile; // пока что можешь игнорировать, мы используем tileDef из карты
+    public TileDefinition crossTile; // можно не использовать, карты сами передают tileDef
 
     [Header("Выровнять тайл относительно клетки")]
     public Vector3 tilePositionOffset = Vector3.zero; // сдвиг относительно anchor
     public float baseRotationY = 0f;                  // базовый поворот для Rotation.R0
 
     [Header("Превью тайла")]
-    public Color previewCanColor = new Color(0f, 1f, 0f, 0.5f);
-    public Color previewCantColor = new Color(1f, 0f, 0f, 0.5f);
+    public Material previewCanMaterial;   // зелёный прозрачный
+    public Material previewCantMaterial;  // красный прозрачный
+    public float previewOverlayHeight = 0.02f; // насколько выше тайла лежит оверлей
+    public float previewOverlayScale = 1.05f;  // чуть больше тайла по размеру
 
     private BoardModel board;
     private Transform[,] anchors = new Transform[BoardModel.Width, BoardModel.Height];
 
     // данные для призрачного тайла
     private GameObject previewGO;
-    private Renderer[] previewRenderers;
-    private TileDefinition previewDef; // какой деф сейчас визуализируем
+    private GameObject previewOverlayGO;
+    private TileDefinition previewDef;
 
     private void Awake()
     {
@@ -47,7 +49,7 @@ public class Board3DView : MonoBehaviour
         if (def == null)
             return false;
 
-        if (!board.IsInside(x, y))
+        if (x < 0 || x >= BoardModel.Width || y < 0 || y >= BoardModel.Height)
             return false;
 
         if (board.Get(x, y) != null)
@@ -61,13 +63,11 @@ public class Board3DView : MonoBehaviour
     /// </summary>
     public bool TryPlaceTile(TileDefinition def, Rotation rot, int x, int y)
     {
-        if (!CanPlaceTile(def, rot, x, y))
+        if (!PlacementValidator.CanPlace(board, x, y, def, rot))
             return false;
 
         board.Set(x, y, new TileInstance(def, rot));
         SpawnTileWorld(def, rot, x, y);
-
-        // после реального размещения убираем призрак (если был)
         HidePreview();
 
         return true;
@@ -100,7 +100,13 @@ public class Board3DView : MonoBehaviour
     /// </summary>
     public void UpdatePreview(TileDefinition def, Rotation rot, int x, int y, bool canPlace)
     {
-        if (def == null || !board.IsInside(x, y))
+        if (def == null)
+        {
+            HidePreview();
+            return;
+        }
+
+        if (x < 0 || x >= BoardModel.Width || y < 0 || y >= BoardModel.Height)
         {
             HidePreview();
             return;
@@ -120,8 +126,10 @@ public class Board3DView : MonoBehaviour
                 Destroy(previewGO);
 
             previewGO = Instantiate(def.WorldPrefab, anchor.position, Quaternion.identity, transform);
-            previewRenderers = previewGO.GetComponentsInChildren<Renderer>();
             previewDef = def;
+
+            // создаём или перенастраиваем оверлей
+            CreateOrSetupOverlay();
         }
 
         // позиция и поворот такие же, как у реального тайла
@@ -131,24 +139,45 @@ public class Board3DView : MonoBehaviour
         previewGO.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
         previewGO.transform.position += previewGO.transform.TransformVector(tilePositionOffset);
 
-        // цвет в зависимости от валидности
-        Color c = canPlace ? previewCanColor : previewCantColor;
-
-        if (previewRenderers != null)
+        // обновляем оверлей (цвет и положение)
+        if (previewOverlayGO != null)
         {
-            foreach (var r in previewRenderers)
+            previewOverlayGO.transform.localPosition = new Vector3(0f, previewOverlayHeight, 0f);
+            previewOverlayGO.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            previewOverlayGO.transform.localScale = new Vector3(previewOverlayScale, previewOverlayScale, previewOverlayScale);
+
+            var rend = previewOverlayGO.GetComponent<Renderer>();
+            if (rend != null)
             {
-                if (r == null) continue;
-                // renderer.material создаёт копию материала для этого инстанса — для прототипа норм
-                if (r.material.HasProperty("_Color"))
-                {
-                    var col = c;
-                    r.material.color = col;
-                }
+                if (canPlace && previewCanMaterial != null)
+                    rend.material = previewCanMaterial;
+                else if (!canPlace && previewCantMaterial != null)
+                    rend.material = previewCantMaterial;
             }
         }
 
         previewGO.SetActive(true);
+    }
+
+    private void CreateOrSetupOverlay()
+    {
+        if (previewGO == null)
+            return;
+
+        if (previewOverlayGO == null)
+        {
+            previewOverlayGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            previewOverlayGO.name = "PreviewOverlay";
+            previewOverlayGO.transform.SetParent(previewGO.transform, false);
+
+            // коллайдер от квадрата нам не нужен
+            var col = previewOverlayGO.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+        }
+        else
+        {
+            previewOverlayGO.transform.SetParent(previewGO.transform, false);
+        }
     }
 
     public void HidePreview()

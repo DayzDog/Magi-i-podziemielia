@@ -12,11 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 067a8c3905b7bf84abeb3706a5db06cf, type: 3}
   m_Name: Tile_Tee
   m_EditorClassIdentifier: Assembly-CSharp::TileDefinition
-  Type: 1
-  Sprite: {fileID: 0}
-  WorldPrefab: {fileID: 919132149155446097, guid: c2c00d62b39502a428088e02446a7420, type: 3}
-  BaseSockets:
+  tileType: 0
+  baseSockets:
     Up: 1
     Right: 1
     Down: 1
     Left: 0
+  WorldPrefab: {fileID: 8978271765548159294, guid: 2039ce906b0db97469f641537a2945ee, type: 3}
