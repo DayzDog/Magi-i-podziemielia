@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a510757b01c3ae49a657ece4f08a269, type: 3}
+  m_Name: T_room
+  m_EditorClassIdentifier: Assembly-CSharp::TileType
+  tileName: T_room
+  prefab: {fileID: 7742247650288585818, guid: aa391b41d49a8494ebc01f5e3ebe8ef3, type: 3}
+  Top: 1
+  Right: 0
+  Bottom: 1
+  Left: 1

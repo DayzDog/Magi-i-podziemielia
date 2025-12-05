@@ -1,22 +1,27 @@
-using Mono.Cecil;
 using UnityEngine;
-using UnityEngine.EventSystems;
 
-public class TileCard : MonoBehaviour, IPointerDownHandler // для UI
+public class TileCard : MonoBehaviour
 {
-    public TileDefinition definition;
+    // Сюда в инспекторе перетащи ПРЕФАБ тайла, который эта карточка создает
+    public GameObject tilePrefab;
 
-    // Для 3D-карточки с коллайдером:
-    private void OnMouseDown()
+    // Сюда перетащи объект "Призрак" (маленькая копия над карточкой), если он есть
+    public GameObject previewGhost;
+
+    void Start()
     {
-        if (definition != null)
-            PlacementController.Instance.BeginPlacement(definition);
+        // Скрываем призрака при старте игры
+        if (previewGhost != null) previewGhost.SetActive(false);
     }
 
-    // Для UI-кнопки/карточки:
-    public void OnPointerDown(PointerEventData eventData)
+    // Будем вызывать эти методы из главного контроллера
+    public void OnHoverEnter()
     {
-        if (definition != null)
-            PlacementController.Instance.BeginPlacement(definition);
+        if (previewGhost != null) previewGhost.SetActive(true);
+    }
+
+    public void OnHoverExit()
+    {
+        if (previewGhost != null) previewGhost.SetActive(false);
     }
 }
