@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem; // Подключаем новую систему ввода
+using UnityEngine.SceneManagement;
+
 
 public class GameManager : MonoBehaviour
 {
@@ -28,6 +30,12 @@ public class GameManager : MonoBehaviour
     void Update()
     {
         HandleInteraction();
+
+        // Логика перезапуска
+        if (Keyboard.current.rKey.wasPressedThisFrame)
+        {
+            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        }
     }
 
     // Главная функция, обрабатывающая действия игрока
@@ -166,22 +174,25 @@ public class GameManager : MonoBehaviour
     // Финальная установка тайла
     void PlaceTile(GridCell cell)
     {
-        // Возвращаем нормальный материал (или оставляем как есть, если у префаба свой материал)
+        // ... (Тут твой код возврата материалов, как был раньше) ...
         Renderer[] renderers = currentPhantomTile.GetComponentsInChildren<Renderer>();
         foreach (var r in renderers) r.material = defaultTileMaterial;
 
-        // Включаем коллайдер обратно (если нужно)
         Collider col = currentPhantomTile.GetComponent<Collider>();
         if (col != null) col.enabled = true;
 
-        // Привязываем логически
         cell.currentTile = phantomTileInfo;
-        
-        // Ставим точно в центр
         currentPhantomTile.transform.position = cell.transform.position;
-        currentPhantomTile.transform.parent = cell.transform; // Делаем дочерним объектом клетки
+        currentPhantomTile.transform.parent = cell.transform;
 
-        // Обнуляем переменную, чтобы можно было брать новый тайл
+        // НОВАЯ ЛОГИКА:
+        // 1. Раз мы поставили этот тайл, значит он подключился к сети (проверка выше это гарантировала)
+        phantomTileInfo.isConnectedToStart = true;
+
+        // 2. Теперь нужно "Разбудить" соседей. 
+        // Вдруг мы только что подключились к Финишу? Теперь он тоже должен стать активным!
+        UpdateNeighborsStatus(cell);
+
         currentPhantomTile = null;
         phantomTileInfo = null;
     }
@@ -189,72 +200,100 @@ public class GameManager : MonoBehaviour
     // --- САМОЕ ГЛАВНОЕ: ЛОГИКА ПРОВЕРКИ ---
     bool CheckPlacementRules(GridCell targetCell)
     {
-        // 1. Если клетка занята - сразу нет
         if (!targetCell.IsEmpty()) return false;
 
-        bool allConnectionsValid = true;   // Не врезаемся ли мы в стены?
-        bool hasRedPathConnection = false; // Соединились ли мы хотя бы одной КРАСНОЙ дорогой?
+        bool allConnectionsValid = true;   // Геометрия (Стена к стене, Путь к пути)
+        bool connectsToActiveNetwork = false; // Есть ли контакт с "заряженным" тайлом?
 
         Vector3[] directions = { Vector3.forward, Vector3.right, Vector3.back, Vector3.left };
         int[] neighborSideMap = { 2, 3, 0, 1 };
+        float cellSize = 1.0f; // Твой размер клетки
 
-        // Твой размер клетки (оставь то значение, которое заработало у тебя в прошлый раз!)
-        float cellSize = 1.0f;
-
-        int neighborsCount = 0; // Считаем, сколько вообще соседей вокруг
+        int neighborsCount = 0;
 
         for (int i = 0; i < 4; i++)
         {
             Vector3 checkPos = targetCell.transform.position + directions[i] * cellSize;
 
-            // Рисуем лучи для отладки
-            Debug.DrawLine(targetCell.transform.position, checkPos, Color.gray, 0.1f);
-
             RaycastHit hit;
-            // Ищем соседа
             if (Physics.Raycast(checkPos + Vector3.up * 2, Vector3.down, out hit, 5f, gridLayer))
             {
                 GridCell neighborCell = hit.collider.GetComponent<GridCell>();
 
-                // Если сосед существует и в нем есть тайл (или это старт)
                 if (neighborCell != null && !neighborCell.IsEmpty())
                 {
-                    neighborsCount++; // Нашли соседа
+                    neighborsCount++;
+                    TileInfo neighborTile = neighborCell.currentTile;
 
-                    // Мой выход в эту сторону
                     bool myPath = phantomTileInfo.GetConnection(i);
-                    // Выход соседа в мою сторону
-                    bool neighborPath = neighborCell.currentTile.GetConnection(neighborSideMap[i]);
+                    bool neighborPath = neighborTile.GetConnection(neighborSideMap[i]);
 
-                    // ПРОВЕРКА 1: Конфликт (Дорога в Стену)
+                    // 1. Проверка на конфликты (как и раньше)
                     if (myPath != neighborPath)
                     {
-                        // Если пути разные (один True, другой False) - это всегда ошибка
-                        allConnectionsValid = false;
-                        // Рисуем красный крест ошибки
-                        Debug.DrawLine(targetCell.transform.position, neighborCell.transform.position, Color.red, 1.0f);
+                        allConnectionsValid = false; // Ошибка: путь уперся в стену
                     }
                     else
                     {
-                        // ПРОВЕРКА 2: Если конфликта нет, проверяем, ЧТО именно совпало
-                        // Если оба True (Дорога к Дороге) - это то, что нам нужно!
+                        // 2. Если пути совпали (Дорога к Дороге)
                         if (myPath == true && neighborPath == true)
                         {
-                            hasRedPathConnection = true;
-                            // Рисуем зеленую линию успеха
-                            Debug.DrawLine(targetCell.transform.position, neighborCell.transform.position, Color.green, 1.0f);
+                            // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
+                            // Мы считаем соединение валидным для постройки, ТОЛЬКО если сосед уже "подключен"
+                            if (neighborTile.isConnectedToStart)
+                            {
+                                connectsToActiveNetwork = true;
+                            }
+                            // Если сосед - это Финиш (который пока выключен), connectsToActiveNetwork останется false.
+                            // Мы сможем поставить тайл рядом с ним, только если с ДРУГОЙ стороны 
+                            // мы касаемся "заряженного" тайла.
                         }
-                        // Если оба False (Стена к Стене) - это нормально, но hasRedPathConnection не ставим в true
                     }
                 }
             }
         }
 
-        // ИТОГОВОЕ РЕШЕНИЕ:
-        // 1. Мы не должны врезаться в стены (allConnectionsValid)
-        // 2. Мы должны быть присоединены ХОТЯ БЫ ОДНОЙ дорогой (hasRedPathConnection)
-        // 3. (Дополнительно) Должен быть вообще хоть один сосед (neighborsCount > 0)
+        // Разрешаем ставить, если нет конфликтов И мы подключились к активной сети
+        return allConnectionsValid && connectsToActiveNetwork && (neighborsCount > 0);
+    }
 
-        return allConnectionsValid && hasRedPathConnection && (neighborsCount > 0);
+    void UpdateNeighborsStatus(GridCell centerCell)
+    {
+        Vector3[] directions = { Vector3.forward, Vector3.right, Vector3.back, Vector3.left };
+        int[] neighborSideMap = { 2, 3, 0, 1 };
+        float cellSize = 1.0f; // Твой размер клетки
+
+        TileInfo myTile = centerCell.currentTile;
+
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 checkPos = centerCell.transform.position + directions[i] * cellSize;
+            RaycastHit hit;
+            if (Physics.Raycast(checkPos + Vector3.up * 2, Vector3.down, out hit, 5f, gridLayer))
+            {
+                GridCell neighborCell = hit.collider.GetComponent<GridCell>();
+
+                if (neighborCell != null && !neighborCell.IsEmpty())
+                {
+                    TileInfo neighborTile = neighborCell.currentTile;
+
+                    // Если у соседа FALSE, а у нас TRUE, и мы соединены дорогами...
+                    if (!neighborTile.isConnectedToStart && myTile.isConnectedToStart)
+                    {
+                        bool myPath = myTile.GetConnection(i);
+                        bool neighborPath = neighborTile.GetConnection(neighborSideMap[i]);
+
+                        // Если дороги соединены
+                        if (myPath && neighborPath)
+                        {
+                            // "Включаем" соседа (например, Финиш)
+                            neighborTile.isConnectedToStart = true;
+                            // (Опционально) Здесь можно проверить, не Финиш ли это, и запустить победу!
+                            Debug.Log("Мы подключили тайл к сети!");
+                        }
+                    }
+                }
+            }
+        }
     }
 }
