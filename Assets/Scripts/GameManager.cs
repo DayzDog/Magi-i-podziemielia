@@ -34,8 +34,17 @@ public class GameManager : MonoBehaviour
         // Логика перезапуска
         if (Keyboard.current.rKey.wasPressedThisFrame)
         {
-            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+            ReloadScene();
         }
+    }
+
+    void ReloadScene()
+    {
+        // Получаем имя текущей активной сцены
+        string currentSceneName = SceneManager.GetActiveScene().name;
+
+        // Загружаем эту сцену заново
+        SceneManager.LoadScene(currentSceneName);
     }
 
     // Главная функция, обрабатывающая действия игрока
