@@ -194,11 +194,17 @@ public class GameManager : MonoBehaviour
         currentPhantomTile.transform.position = cell.transform.position;
         currentPhantomTile.transform.parent = cell.transform;
 
-        // НОВАЯ ЛОГИКА:
-        // 1. Раз мы поставили этот тайл, значит он подключился к сети (проверка выше это гарантировала)
+        
+        //Раз мы поставили этот тайл, значит он подключился к сети (проверка выше это гарантировала)
         phantomTileInfo.isConnectedToStart = true;
 
-        // 2. Теперь нужно "Разбудить" соседей. 
+        //УБИРАЕМ ТУМАН в той клетке, куда только что поставили тайл
+        cell.Reveal();
+
+        // ПРОВЕРКА СОСЕДЕЙ НА ВИДИМОСТЬ
+        CheckNeighborsVisibility(cell);
+
+        
         // Вдруг мы только что подключились к Финишу? Теперь он тоже должен стать активным!
         UpdateNeighborsStatus(cell);
 
@@ -247,12 +253,19 @@ public class GameManager : MonoBehaviour
                         // 2. Если пути совпали (Дорога к Дороге)
                         if (myPath == true && neighborPath == true)
                         {
-                            // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
                             // Мы считаем соединение валидным для постройки, ТОЛЬКО если сосед уже "подключен"
                             if (neighborTile.isConnectedToStart)
                             {
                                 connectsToActiveNetwork = true;
                             }
+                            // Подключаем соседа к сети
+                            //neighborTile.isConnectedToStart = true;
+
+                            // УБИРАЕМ ТУМАН У СОСЕДА (Это сработает для Финиша!)
+                            neighborCell.Reveal();
+
+                            Debug.Log("Мы подключили тайл (или финиш) к сети и развеяли туман!");
+                           
                             // Если сосед - это Финиш (который пока выключен), connectsToActiveNetwork останется false.
                             // Мы сможем поставить тайл рядом с ним, только если с ДРУГОЙ стороны 
                             // мы касаемся "заряженного" тайла.
@@ -301,6 +314,32 @@ public class GameManager : MonoBehaviour
                             Debug.Log("Мы подключили тайл к сети!");
                         }
                     }
+                }
+            }
+        }
+    }
+
+    void CheckNeighborsVisibility(GridCell centerCell)
+    {
+        Vector3[] directions = { Vector3.forward, Vector3.right, Vector3.back, Vector3.left };
+        float cellSize = 1.0f; // Твой размер клетки
+
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 checkPos = centerCell.transform.position + directions[i] * cellSize;
+            RaycastHit hit;
+
+            // Стреляем лучом в соседа
+            if (Physics.Raycast(checkPos + Vector3.up * 2, Vector3.down, out hit, 5f, gridLayer))
+            {
+                GridCell neighborCell = hit.collider.GetComponent<GridCell>();
+
+                // Если там кто-то есть (например, скрытый Финиш)
+                if (neighborCell != null && !neighborCell.IsEmpty())
+                {
+                    // ПРОЯВЛЯЕМ ЕГО!
+                    // Даже если мы еще не соединились трубами, мы просто встали РЯДОМ.
+                    neighborCell.ShowTileVisuals();
                 }
             }
         }

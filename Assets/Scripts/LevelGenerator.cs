@@ -57,5 +57,8 @@ public class LevelGenerator : MonoBehaviour
             if (newTileInfo != null)
                 newTileInfo.isConnectedToStart = false;
         }
+
+        // —разу пр€чем финиш, как только создали
+        targetCell.HideTileVisuals();
     }
 }
