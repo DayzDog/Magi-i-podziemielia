@@ -5,6 +5,10 @@ public class Board3DView : MonoBehaviour
     [Header("Tile defs")]
     public TileDefinition crossTile; // можно не использовать, карты сами передают tileDef
 
+    [Header("Start tile")]
+    public TileDefinition startTileDefinition; // Tile_Start (SO)
+    public Transform startCellAnchor;
+
     [Header("Выровнять тайл относительно клетки")]
     public Vector3 tilePositionOffset = Vector3.zero; // сдвиг относительно anchor
     public float baseRotationY = 0f;                  // базовый поворот для Rotation.R0
@@ -16,6 +20,7 @@ public class Board3DView : MonoBehaviour
     public float previewOverlayScale = 1.05f;  // чуть больше тайла по размеру
 
     private BoardModel board;
+    private TileInstance startTileInstance;
     private Transform[,] anchors = new Transform[BoardModel.Width, BoardModel.Height];
 
     // данные для призрачного тайла
@@ -26,6 +31,25 @@ public class Board3DView : MonoBehaviour
     private void Awake()
     {
         board = new BoardModel();
+        anchors = new Transform[BoardModel.Width, BoardModel.Height];
+
+        // Собираем якоря клеток (Cell_x_y) из BoardRoot/BoardMesh
+        var markers = GetComponentsInChildren<BoardCellMarker>();
+        foreach (var m in markers)
+        {
+            if (m.x < 0 || m.x >= BoardModel.Width || m.y < 0 || m.y >= BoardModel.Height)
+                continue;
+
+            anchors[m.x, m.y] = m.transform;
+        }
+
+        // создаём "виртуальный" инстанс стартового тайла (для логики)
+        if (startTileDefinition != null)
+        {
+            startTileInstance = new TileInstance(startTileDefinition, Rotation.R0);
+        }
+
+        /*board = new BoardModel();
 
         // ищем все маркеры-клетки внутри этого BoardRoot
         var markers = GetComponentsInChildren<BoardCellMarker>();
@@ -38,7 +62,36 @@ public class Board3DView : MonoBehaviour
             }
 
             anchors[m.x, m.y] = m.transform;
+        }*/
+    }
+    private void Start()
+    {
+        SpawnStartTileVisual();
+    }
+
+    private void SpawnStartTileVisual()
+    {
+        if (startTileDefinition == null ||
+            startTileDefinition.WorldPrefab == null ||
+            startCellAnchor == null)
+        {
+            Debug.LogWarning("StartTileDefinition или startCellAnchor не настроены в Board3DView");
+            return;
         }
+
+        // Берём МИРОВУЮ позицию Cell_Start, но НЕ делаем префаб его дочкой
+        Vector3 worldPos = startCellAnchor.position;
+
+        // Родителем ставим тот же объект, что и для обычных тайлов (Board3DView)
+        var go = Instantiate(
+            startTileDefinition.WorldPrefab,
+            worldPos,
+            Quaternion.identity,
+            transform);   // <--- ВАЖНО: transform, а не startCellAnchor
+
+        // Доп. поворот, если надо развернуть "дверь" вверх
+        // (можно сделать публичное поле startTileRotationY, если хочешь крутить в инспекторе)
+        // go.transform.rotation = Quaternion.Euler(0f, startTileRotationY, 0f);
     }
 
     /// <summary>
@@ -55,13 +108,35 @@ public class Board3DView : MonoBehaviour
         if (board.Get(x, y) != null)
             return false;
 
-        return PlacementValidator.CanPlace(board, x, y, def, rot);
+        return PlacementValidator.CanPlace(board, startTileInstance, x, y, def, rot);
     }
 
     /// <summary>
     /// Попытаться поставить тайл по правилам; при успехе обновляет модель и спавнит реальный тайл.
     /// </summary>
+
     public bool TryPlaceTile(TileDefinition def, Rotation rot, int x, int y)
+    {
+        bool canPlace = PlacementValidator.CanPlace(board, startTileInstance, x, y, def, rot); // <-- передаём стартовый тайл
+
+        if (!canPlace)
+            return false;
+
+        var instance = new TileInstance(def, rot);
+        board.Set(x, y, instance);
+
+        SpawnTileWorld(def, rot, x, y);
+
+        HidePreview();
+
+        // если у тебя есть логика скрытия превью — её оставь
+        // HidePreview();
+
+        return true;
+    }
+
+
+    /*public bool TryPlaceTile(TileDefinition def, Rotation rot, int x, int y)
     {
         if (!PlacementValidator.CanPlace(board, x, y, def, rot))
             return false;
@@ -71,7 +146,7 @@ public class Board3DView : MonoBehaviour
         HidePreview();
 
         return true;
-    }
+    }*/
 
     private void SpawnTileWorld(TileDefinition def, Rotation rot, int x, int y)
     {

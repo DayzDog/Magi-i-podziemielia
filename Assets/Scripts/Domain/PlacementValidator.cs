@@ -3,33 +3,35 @@ using System;
 
 public static class PlacementValidator
 {
-    public static bool CanPlace(BoardModel board, int x, int y,
-                                TileDefinition def, Rotation rot)
+    public static bool CanPlace(
+        BoardModel board,
+        TileInstance startTile,      // <-- НОВОЕ: тайл старта
+        int x,
+        int y,
+        TileDefinition def,
+        Rotation rot)
     {
         if (def == null)
             return false;
 
-        // клетка должна быть внутри поля
         if (!board.IsInside(x, y))
             return false;
 
-        // и пустой
         if (!board.IsEmpty(x, y))
             return false;
 
-        // сокеты кандидата с учётом текущего поворота
+        // сокеты кандидата с учётом поворота
         Sockets candidateSockets = def.GetSockets(rot);
 
-        bool hasConnection = false; // есть ли хотя бы одно соединение path–path
+        bool hasConnection = false; // есть ли хотя бы одно path–path
 
-        // проверяем всех четырёх соседей
+        // 1) проверяем соседей на самом поле 5×5
         foreach (Side side in Enum.GetValues(typeof(Side)))
         {
             Vector2Int offset = side.Offset();
             int nx = x + offset.x;
             int ny = y + offset.y;
 
-            // край поля игнорируем (подземелье обрезано рамкой)
             if (!board.IsInside(nx, ny))
                 continue;
 
@@ -41,33 +43,30 @@ public static class PlacementValidator
             Side opposite = SideUtil.Opposite(side);
             bool theirEdge = neighbor.Connections.Get(opposite);
 
-            // ПРАВИЛО 1: путь–стена / стена–путь — нельзя
+            // путь–стена / стена–путь запрещаем
             if (ourEdge != theirEdge)
-            {
                 return false;
-            }
 
-            // путь–путь — считаем это реальным соединением
+            // путь–путь — считаем соединением
             if (ourEdge && theirEdge)
-            {
                 hasConnection = true;
-            }
         }
 
-        // ПРАВИЛО 2: либо есть хотя бы одно соединение,
-        // либо это ПЕРВЫЙ тайл над стартовым полем.
-        bool isFirstFromStart = false;
-
-        // у нас старт находится под клеткой (2,0),
-        // и у стартового тайла путь ВВЕРХ, значит у первого тайла
-        // в (2,0) должен быть путь ВНИЗ
-        if (x == 2 && y == 0)
+        // 2) отдельный случай: сосед "снизу" — стартовый тайл
+        // логически старт стоит под клеткой (2,0), на виртуальной позиции (2,-1)
+        if (startTile != null && x == 2 && y == 0)
         {
-            if (candidateSockets.Down)
-                isFirstFromStart = true;
+            bool ourEdge = candidateSockets.Down;          // наш путь вниз
+            bool theirEdge = startTile.Connections.Up;       // путь старта вверх
+
+            if (ourEdge != theirEdge)
+                return false;
+
+            if (ourEdge && theirEdge)
+                hasConnection = true;
         }
 
-        // обычным тайлам без соединения — НЕЛЬЗЯ
-        return hasConnection || isFirstFromStart;
+        // 3) запрещаем островки: хотя бы одно соединение должно быть
+        return hasConnection;
     }
 }
