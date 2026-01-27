@@ -1,25 +1,20 @@
-using UnityEngine;
+using System;
 
-/// <summary>
-/// Конкретный тайл на поле: какой деф, какой поворот и какие стороны открыты.
-/// </summary>
-public class TileInstance
+public sealed class TileInstance
 {
-    public TileDefinition Definition { get; private set; }
-    public Rotation Rotation { get; set; }
+    /// <summary>ScriptableObject тайла.</summary>
+    public TileDefinition Def { get; }
 
-    // Готовые Up/Right/Down/Left для этого инстанса
-    public Sockets Connections;
+    /// <summary>Поворот тайла (0 / 90 / 180 / 270).</summary>
+    public Rotation Rot { get; set; }
+
+    /// <summary>Текущие соединения (куда есть путь). Можно менять магией.</summary>
+    public Sockets Connections { get; set; }
 
     public TileInstance(TileDefinition def, Rotation rot)
     {
-        Definition = def;
-        Rotation = rot;
+        Def = def ?? throw new ArgumentNullException(nameof(def));
+        Rot = rot;
         Connections = def.GetSockets(rot);
-    }
-
-    public bool Get(Side side)
-    {
-        return Connections.Get(side);
     }
 }
