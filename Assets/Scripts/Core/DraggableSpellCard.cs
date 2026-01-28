@@ -1,11 +1,13 @@
 using UnityEngine;
 using UnityEngine.InputSystem; // новый Input System
 
+
 public class DraggableSpellCard : MonoBehaviour
 {
     [Header("Ссылки")]
     public Board3DView board;
     public Camera mainCamera;
+    public CardDeckManager deckManager;
     public SpellType spellType;
 
     [Header("Перетаскивание")]
@@ -14,24 +16,33 @@ public class DraggableSpellCard : MonoBehaviour
     private bool isDragging;
     private Vector3 dragOffset;
     private Vector3 startPosition;
+    private Quaternion startRotation;
     private Transform startParent;
     private Plane dragPlane;
 
-    // все коллайдеры самой карты (чтобы временно отключать)
     private Collider[] ownColliders;
 
     private void Awake()
-    {
-        ownColliders = GetComponentsInChildren<Collider>();
-    }
-
-    private void Start()
     {
         if (mainCamera == null)
             mainCamera = Camera.main;
 
         if (board == null)
             board = FindFirstObjectByType<Board3DView>();
+
+        if (deckManager == null)
+            deckManager = FindFirstObjectByType<CardDeckManager>();
+
+        ownColliders = GetComponentsInChildren<Collider>();
+    }
+
+    private Vector2 GetMouseScreenPos()
+    {
+        if (Mouse.current != null)
+            return Mouse.current.position.ReadValue();
+
+        // fallback, если вдруг старый Input System
+        return Input.mousePosition;
     }
 
     private void OnMouseDown()
@@ -40,13 +51,15 @@ public class DraggableSpellCard : MonoBehaviour
 
         isDragging = true;
         startPosition = transform.position;
+        startRotation = transform.rotation;
         startParent = transform.parent;
 
         dragPlane = new Plane(
             Vector3.up,
-            transform.position + Vector3.up * dragPlaneHeightOffset);
+            transform.position + Vector3.up * dragPlaneHeightOffset
+        );
 
-        Vector2 screenPos = Mouse.current.position.ReadValue();
+        Vector2 screenPos = GetMouseScreenPos();
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
 
         if (dragPlane.Raycast(ray, out float enter))
@@ -64,7 +77,7 @@ public class DraggableSpellCard : MonoBehaviour
     {
         if (!isDragging || mainCamera == null) return;
 
-        Vector2 screenPos = Mouse.current.position.ReadValue();
+        Vector2 screenPos = GetMouseScreenPos();
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
 
         if (dragPlane.Raycast(ray, out float enter))
@@ -88,93 +101,96 @@ public class DraggableSpellCard : MonoBehaviour
 
         if (mainCamera != null && board != null)
         {
-            // Временно отключаем коллайдеры самой карты,
-            // чтобы луч не попадал в неё
+            // ВРЕМЕННО отключаем свои коллайдеры,
+            // чтобы луч не попадал в карту
             if (ownColliders != null)
             {
                 foreach (var col in ownColliders)
                     if (col != null) col.enabled = false;
             }
 
-            Vector2 screenPos = Mouse.current.position.ReadValue();
+            Vector2 screenPos = GetMouseScreenPos();
             Ray ray = mainCamera.ScreenPointToRay(screenPos);
 
             if (Physics.Raycast(ray, out RaycastHit hit, 200f))
             {
-                // Сначала проверяем, не попали ли в мага
+                Debug.Log($"[SpellCard] Hit {hit.collider.name} with {spellType}");
+
+                // 1) Сначала проверяем, не попали ли мы в Мага
                 var mage = hit.collider.GetComponentInParent<MagePawn>();
 
-                // Параллельно пытаемся вытащить координаты клетки
-                TileWorld tw = hit.collider.GetComponentInParent<TileWorld>();
-                BoardCellMarker cell = null;
-                if (tw == null)
-                    cell = hit.collider.GetComponentInParent<BoardCellMarker>();
-
-                int? tx = null;
-                int? ty = null;
-
-                if (tw != null)
+                if (mage != null)
                 {
-                    tx = tw.x;
-                    ty = tw.y;
-                    Debug.Log($"[SpellCard] {spellType} hit TileWorld ({tx},{ty}), collider: {hit.collider.name}");
-                }
-                else if (cell != null)
-                {
-                    tx = cell.x;
-                    ty = cell.y;
-                    Debug.Log($"[SpellCard] {spellType} hit Cell ({tx},{ty}), collider: {hit.collider.name}");
+                    switch (spellType)
+                    {
+                        case SpellType.Air:
+                            // Воздух по магу — просто подсветка ходов
+                            used = board.TryCastAirOnMage();
+                            break;
+
+                        case SpellType.Fire:
+                            // Огонь по магу — крутим комнату ПОД магом
+                            used = board.TryCastFireOnCurrent();
+                            break;
+
+                        // Камень и вода по самому магу сейчас не работают
+                        case SpellType.Stone:
+                        case SpellType.Water:
+                            used = false;
+                            break;
+                    }
                 }
                 else
                 {
-                    Debug.Log($"[SpellCard] {spellType} hit '{hit.collider.name}', без TileWorld/BoardCellMarker.");
-                }
+                    // 2) Иначе пытаемся понять, в какую клетку / тайл попали
+                    TileWorld tw = hit.collider.GetComponentInParent<TileWorld>();
+                    BoardCellMarker cell = null;
 
-                switch (spellType)
-                {
-                    case SpellType.Stone:
-                        // если попали по стартовому тайлу — спец. случай
-                        if (tw != null && tw.isStart)
-                        {
-                            used = board.TryCastStoneBetweenStartAndFirstCell();
-                        }
-                        else if (tx.HasValue && ty.HasValue)
-                        {
-                            // обычный камень между комнатой под магом и целевой клеткой
-                            used = board.TryCastStoneOnCell(tx.Value, ty.Value);
-                        }
-                        break;
+                    if (tw == null)
+                        cell = hit.collider.GetComponentInParent<BoardCellMarker>();
 
-                    case SpellType.Water:
-                        if (tx.HasValue && ty.HasValue)
-                            used = board.TryCastWaterOnCell(tx.Value, ty.Value);
-                        break;
+                    int? tx = null;
+                    int? ty = null;
 
-                    case SpellType.Air:
-                        // Воздух: если попали в мага — спец. логика (подсветка ходов)
-                        if (mage != null)
-                        {
-                            Debug.Log("[SpellCard] Air hit Mage, показываем подсветку ходов.");
-                            used = board.TryCastAirOnMage();
-                        }
-                        else if (tx.HasValue && ty.HasValue)
-                        {
-                            used = board.TryCastAirOnCell(tx.Value, ty.Value);
-                        }
-                        break;
+                    if (tw != null)
+                    {
+                        tx = tw.x;
+                        ty = tw.y;
+                        Debug.Log($"[SpellCard] Hit TileWorld ({tx},{ty})");
+                    }
+                    else if (cell != null)
+                    {
+                        tx = cell.x;
+                        ty = cell.y;
+                        Debug.Log($"[SpellCard] Hit Cell ({tx},{ty})");
+                    }
+                    else
+                    {
+                        Debug.Log("[SpellCard] Ray hit object без TileWorld/BoardCellMarker.");
+                    }
 
-                    case SpellType.Fire:
-                        // Огонь: тоже реагирует на мага
-                        if (mage != null)
+                    if (tx.HasValue && ty.HasValue)
+                    {
+                        switch (spellType)
                         {
-                            Debug.Log("[SpellCard] Fire hit Mage, каст по текущей комнате.");
-                            used = board.TryCastFireOnCurrent();
+                            case SpellType.Stone:
+                                used = board.TryCastStoneOnCell(tx.Value, ty.Value);
+                                break;
+
+                            case SpellType.Water:
+                                used = board.TryCastWaterOnCell(tx.Value, ty.Value);
+                                break;
+
+                            case SpellType.Air:
+                                used = board.TryCastAirOnCell(tx.Value, ty.Value);
+                                break;
+
+                            case SpellType.Fire:
+                                // ОГОНЬ: только если это комната под магом
+                                used = board.TryCastFireFromMageOnCell(tx.Value, ty.Value);
+                                break;
                         }
-                        else if (tx.HasValue && ty.HasValue)
-                        {
-                            used = board.TryCastFireOnCell(tx.Value, ty.Value);
-                        }
-                        break;
+                    }
                 }
             }
             else
@@ -182,7 +198,7 @@ public class DraggableSpellCard : MonoBehaviour
                 Debug.Log("[SpellCard] Raycast не попал ни во что.");
             }
 
-            // Включаем коллайдеры карты обратно
+            // Возвращаем коллайдеры карты
             if (ownColliders != null)
             {
                 foreach (var col in ownColliders)
@@ -194,18 +210,29 @@ public class DraggableSpellCard : MonoBehaviour
             Debug.LogWarning("[SpellCard] mainCamera или board == null.");
         }
 
-        // DEV-режим: карту не тратим, всегда возвращаем в руку
+        // --- Поведение карты после попытки каста ---
+
         if (used)
         {
-            Debug.Log($"[SpellCard] {spellType} сработало (dev mode, карту возвращаем).");
+            Debug.Log($"[SpellCard] {spellType} успешно сработало.");
+
+            // Если подключён менеджер колоды — сообщаем ему, что карта использована
+            if (deckManager != null)
+            {
+                deckManager.OnSpellCardUsed(this);
+            }
+            else
+            {
+                // запасной вариант, если деки нет
+                Destroy(gameObject);
+            }
         }
         else
         {
-            Debug.Log($"[SpellCard] {spellType} НЕ сработало, карта просто возвращена.");
+            Debug.Log($"[SpellCard] {spellType} НЕ сработало, карта возвращена.");
+            transform.position = startPosition;
+            transform.rotation = startRotation;
+            transform.parent = startParent;
         }
-
-        transform.position = startPosition;
-        transform.parent = startParent;
     }
-
 }

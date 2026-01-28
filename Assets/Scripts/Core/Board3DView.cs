@@ -1279,6 +1279,33 @@ public class Board3DView : MonoBehaviour
     }
 
 
+    /// <summary>
+    /// Огонь по клетке (x,y), но только если это клетка, где стоит маг.
+    /// Никаких ограничений по связности – только проверка позиции мага.
+    /// </summary>
+    public bool TryCastFireFromMageOnCell(int x, int y)
+    {
+        // На старте под магом нет комнаты – крутить нечего
+        if (mageOnStart)
+        {
+            Debug.Log("[Fire] Маг на старте, под ним нет комнаты. Огонь не сработал.");
+            return false;
+        }
+
+        if (!board.IsInside(x, y))
+            return false;
+
+        // Разрешаем жечь только комнату под магом
+        if (x != mageX || y != mageY)
+        {
+            Debug.Log($"[Fire] Огонь можно применять только к комнате, где стоит маг. " +
+                      $"Маг на ({mageX},{mageY}), цель ({x},{y}).");
+            return false;
+        }
+
+        // Тут уже используем обычную логику огня
+        return TryCastFireOnCell(x, y);
+    }
 
 
     /// <summary>

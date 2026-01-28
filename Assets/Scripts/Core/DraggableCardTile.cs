@@ -5,12 +5,16 @@ public class DraggableCardTile : MonoBehaviour
     public TileDefinition tileDef;
     public Board3DView boardView;
 
+    [Header("Deck manager")]
+    [Tooltip("Сюда можно перетащить CardDeckManager (или оставить пустым, тогда найдётся автоматически).")]
+    public CardDeckManager deckManager;
+
     [Header("Настройки перетаскивания")]
     public float dragHeight = 0.1f;
     public KeyCode rotateLeftKey = KeyCode.Q;
     public KeyCode rotateRightKey = KeyCode.E;
     [Range(0f, 1f)]
-    public float hoverCardAlpha = 0.3f; // прозрачность карты над полем
+    public float hoverCardAlpha = 0.3f; // прозрачность карты над полем (если захочешь использовать)
 
     private bool isDragging;
     private Vector3 startPos;
@@ -33,13 +37,21 @@ public class DraggableCardTile : MonoBehaviour
             Debug.LogError("DraggableCardTile: не найдена камера с тегом MainCamera!");
         }
 
+        if (boardView == null)
+            boardView = FindFirstObjectByType<Board3DView>();
+
+        if (deckManager == null)
+            deckManager = FindFirstObjectByType<CardDeckManager>();
+
         cardRenderers = GetComponentsInChildren<Renderer>();
         if (cardRenderers != null)
         {
             originalColors = new Color[cardRenderers.Length];
             for (int i = 0; i < cardRenderers.Length; i++)
             {
-                if (cardRenderers[i] != null && cardRenderers[i].sharedMaterial != null && cardRenderers[i].sharedMaterial.HasProperty("_Color"))
+                if (cardRenderers[i] != null &&
+                    cardRenderers[i].sharedMaterial != null &&
+                    cardRenderers[i].sharedMaterial.HasProperty("_Color"))
                 {
                     originalColors[i] = cardRenderers[i].sharedMaterial.color;
                 }
@@ -127,6 +139,7 @@ public class DraggableCardTile : MonoBehaviour
         startRot = transform.rotation;
         currentRotation = Rotation.R0;
         hoveredCell = null;
+
         boardView.HidePreview();
         SetCardVisible(true);
         SetCardAlpha(1f);
@@ -150,9 +163,29 @@ public class DraggableCardTile : MonoBehaviour
             }
         }
 
-        // В любом случае – убираем призрак и возвращаем карту
+        // Всегда убираем призрак
         boardView.HidePreview();
-        ResetCard();
+
+        if (placed)
+        {
+            Debug.Log("[DungeonCard] Тайл успешно поставлен, карта считается израсходованной.");
+
+            if (deckManager != null)
+            {
+                // Сообщаем дек-менеджеру, что эта карта использована
+                deckManager.OnDungeonCardUsed(gameObject);
+            }
+            else
+            {
+                // На всякий случай, если дек не назначен
+                Destroy(gameObject);
+            }
+        }
+        else
+        {
+            // Если НЕ удалось поставить – просто возвращаем карту на место
+            ResetCard();
+        }
     }
 
     private void UpdateHoverAndPreview()
@@ -225,6 +258,7 @@ public class DraggableCardTile : MonoBehaviour
             }
         }
     }
+
     private void SetCardVisible(bool visible)
     {
         if (cardRenderers == null)
@@ -236,5 +270,4 @@ public class DraggableCardTile : MonoBehaviour
             r.enabled = visible;
         }
     }
-
 }
