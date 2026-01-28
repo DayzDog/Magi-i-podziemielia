@@ -1,23 +1,20 @@
 ﻿using System;
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 
 public class Board3DView : MonoBehaviour
 {
-    [Header("Tile defs")]
-    public TileDefinition crossTile;
+    [Header("Tile defs (общие)")]
+    public TileDefinition crossTile; // можно не использовать
 
     [Header("Sanctum / Гримуар")]
     public TileDefinition sanctumTileDefinition;
-    [Header("Sanctum visuals")]
     public SanctumVisualEntry[] sanctumVisuals;
 
     [Header("Start tile")]
     public TileDefinition startTileDefinition;        // обычный стартовый тайл (дверь открыта вверх)
-    public Transform startCellAnchor;
-    // НОВОЕ: отдельный деф для "заблокированного" старта
     public TileDefinition startTileBlockedDefinition; // вариант, когда проход наверх закрыт камнем
-
+    public Transform startCellAnchor;
 
     [Header("Выровнять тайл относительно клетки")]
     public Vector3 tilePositionOffset = Vector3.zero;
@@ -49,7 +46,7 @@ public class Board3DView : MonoBehaviour
 
     // --- состояние поля ---
     private BoardModel board;
-    private Transform[,] anchors = new Transform[BoardModel.Width, BoardModel.Height];
+    private Transform[,] anchors;
     private TileWorld[,] tileWorlds;
     private TileWorld startTileWorld;
     private TileInstance startTileInstance;
@@ -59,6 +56,11 @@ public class Board3DView : MonoBehaviour
     private bool mageOnStart = true;
     private int mageX = 2;
     private int mageY = 0;
+
+    // NEW: флаг, взят ли гримуар, и победа
+    private bool mageHasGrimoire = false;
+    public bool MageHasGrimoire => mageHasGrimoire;
+    public bool GameWon { get; private set; } = false;
 
     // --- санктум ---
     private int sanctumX;
@@ -86,6 +88,8 @@ public class Board3DView : MonoBehaviour
         public GameObject prefab;
     }
 
+    #region Init / Awake / Start
+
     private void Awake()
     {
         board = new BoardModel();
@@ -109,31 +113,21 @@ public class Board3DView : MonoBehaviour
         {
             startTileInstance = new TileInstance(startTileDefinition, Rotation.R0);
         }
-
-        /*board = new BoardModel();
-
-        // ищем все маркеры-клетки внутри этого BoardRoot
-        var markers = GetComponentsInChildren<BoardCellMarker>();
-        foreach (var m in markers)
-        {
-            if (m.x < 0 || m.x >= BoardModel.Width || m.y < 0 || m.y >= BoardModel.Height)
-            {
-                Debug.LogWarning($"Cell marker {m.name} has invalid coords ({m.x},{m.y})");
-                continue;
-            }
-
-            anchors[m.x, m.y] = m.transform;
-        }*/
     }
+
+    private void Start()
+    {
+        RefreshStartTileVisual();
+        SpawnMage();
+    }
+
     private void InitSanctum()
     {
-        // выбираем случайный X из [0..4]
         sanctumX = UnityEngine.Random.Range(0, BoardModel.Width);
         sanctumY = 4; // верхний ряд
 
         sanctumRevealed = false;
 
-        // Начальные сокеты в зависимости от позиции
         // y=4 — дальний край, значит Up всегда стена (false)
         sanctumSockets.Up = false;
         sanctumSockets.Down = true; // во всех вариантах есть путь вниз
@@ -144,7 +138,7 @@ public class Board3DView : MonoBehaviour
             sanctumSockets.Left = false;
             sanctumSockets.Right = true;
         }
-        else if (sanctumX == BoardModel.Width - 1) // x == 4
+        else if (sanctumX == BoardModel.Width - 1)
         {
             // Правый угол: поворот вниз+влево
             sanctumSockets.Left = true;
@@ -163,6 +157,10 @@ public class Board3DView : MonoBehaviour
         Debug.Log($"[Sanctum] Hidden at ({sanctumX},{sanctumY}), sockets: " +
                   $"U:{sanctumSockets.Up} R:{sanctumSockets.Right} D:{sanctumSockets.Down} L:{sanctumSockets.Left}");
     }
+
+    #endregion
+
+    #region Sanctum
 
     private GameObject GetSanctumPrefabForSockets(Sockets s)
     {
@@ -193,7 +191,7 @@ public class Board3DView : MonoBehaviour
     private void HandleSanctumAfterPlacement(int x, int y, TileInstance placed)
     {
         if (sanctumRevealed)
-            return; // уже открыт — пока ничего особенного не делаем
+            return;
 
         // Проверяем все 4 стороны тайла: не стоит ли рядом скрытый Гримуар
         foreach (Side side in Enum.GetValues(typeof(Side)))
@@ -205,29 +203,20 @@ public class Board3DView : MonoBehaviour
             if (nx != sanctumX || ny != sanctumY)
                 continue; // этот сосед не Гримуар
 
-            // Мы стоим рядом с клеткой Гримуара.
             bool pathFromTile = placed.Connections.Get(side);
 
-            // Сторона Гримуара, которая смотрит на нас — противоположная
             Side sanctumSide = SideUtil.Opposite(side);
             bool pathFromSanctum = sanctumSockets.Get(sanctumSide);
 
             if (pathFromTile && pathFromSanctum)
             {
-                // Путь-путь: раскрываем комнату с гримуаром
                 RevealSanctum();
             }
             else if (!pathFromTile && pathFromSanctum)
             {
-                // У тайла стена к Гримуару: не раскрываем, но "запоминаем" стену
-                // т.е. эта сторона Sanctum тоже становится стеной
                 SetSanctumSocket(sanctumSide, false);
                 Debug.Log($"[Sanctum] Side {sanctumSide} blocked by wall at ({x},{y})");
             }
-            // остальные случаи:
-            //  - pathFromTile && !pathFromSanctum → путь уткнулся в уже "заблокированную" сторону
-            //  - !pathFromTile && !pathFromSanctum → стена к стене
-            // просто ничего не меняем
         }
     }
 
@@ -241,7 +230,6 @@ public class Board3DView : MonoBehaviour
             case Side.Left: sanctumSockets.Left = value; break;
         }
     }
-
 
     private void RevealSanctum()
     {
@@ -257,27 +245,41 @@ public class Board3DView : MonoBehaviour
             return;
         }
 
-        // Создаём инстанс в модели
         sanctumInstance = new TileInstance(sanctumTileDefinition, Rotation.R0);
-        // Перезаписываем Connections в соответствии с накопленными сокетами
         sanctumInstance.Connections = sanctumSockets;
-
-        // Пишем его в BoardModel, чтобы дальнейшая логика (передвижения и т.п.) его видела
         board.Set(sanctumX, sanctumY, sanctumInstance);
 
-        // Визуал: спавним 3D-модель в нужной клетке
+        RefreshSanctumVisual();
+    }
+
+    // ВАЖНО: после того как маг забрал Гримуар, клетка больше не считается Sanctum.
+    private bool IsSanctumCell(int x, int y)
+    {
+        return !mageHasGrimoire && x == sanctumX && y == sanctumY;
+    }
+
+    private void RefreshSanctumVisual()
+    {
+        if (!sanctumRevealed)
+            return;
+
         var anchor = anchors[sanctumX, sanctumY];
         if (anchor == null)
         {
-            Debug.LogWarning("Нет anchor для клетки с Гримуаром");
+            Debug.LogWarning("[Sanctum] Anchor для Sanctum не найден");
             return;
         }
 
-        // выбираем подходящий префаб по текущим sanctumSockets
+        if (sanctumWorldGO != null)
+        {
+            Destroy(sanctumWorldGO);
+            sanctumWorldGO = null;
+        }
+
         GameObject prefab = GetSanctumPrefabForSockets(sanctumSockets);
         if (prefab == null)
         {
-            Debug.LogWarning("Не найден подходящий префаб для текущих сокетов Sanctum");
+            Debug.LogWarning("[Sanctum] Нет префаба для текущих sanctumSockets");
             return;
         }
 
@@ -292,10 +294,48 @@ public class Board3DView : MonoBehaviour
         tw.isStart = false;
 
         tileWorlds[sanctumX, sanctumY] = tw;
-
-        // TODO: сюда позже можно добавить выбор подходящего префаба
-        // по sanctumSockets (угол, T, полностью окружённый и т.д.)
     }
+
+    /// <summary>
+    /// Маг зашёл в Sanctum, подбирает Гримуар, а клетка превращается
+    /// в обычный тайл той же формы и поворота.
+    /// </summary>
+    private void PickupGrimoireAndReplaceSanctum()
+    {
+        mageHasGrimoire = true;
+        Debug.Log("[Game] Маг подобрал Гримуар!");
+
+        // Подбираем подходящую форму по текущим sanctumSockets
+        TileDefinition def;
+        Rotation rot;
+        if (!TryPickShapeBySockets(sanctumSockets, out def, out rot))
+        {
+            // Фолбек – берём любой доступный деф
+            def = tileCrossDef ?? tileStraightDef ?? tileTurnDef ??
+                  tileTeeDef ?? tileDeadEndDef ?? tileBlockedDef;
+
+            rot = Rotation.R0;
+        }
+
+        // Обновляем модель: в клетке Sanctum теперь обычная комната
+        var inst = new TileInstance(def, rot);
+        inst.Connections = sanctumSockets;
+        board.Set(sanctumX, sanctumY, inst);
+
+        // Сносим старый визуал Sanctum
+        if (sanctumWorldGO != null)
+        {
+            Destroy(sanctumWorldGO);
+            sanctumWorldGO = null;
+        }
+
+        // Пересобираем визуал как обычный тайл
+        RebuildTileVisual(sanctumX, sanctumY);
+    }
+
+    #endregion
+
+    #region Mage + Movement
 
     private void SpawnMage()
     {
@@ -316,9 +356,9 @@ public class Board3DView : MonoBehaviour
         mageX = 2;
         mageY = 0;
     }
+
     private void ClearHighlights()
     {
-        // сбрасываем флаг хода у всех тайлов
         if (tileWorlds != null)
         {
             for (int x = 0; x < BoardModel.Width; x++)
@@ -333,7 +373,6 @@ public class Board3DView : MonoBehaviour
         if (startTileWorld != null)
             startTileWorld.canMoveTarget = false;
 
-        // удаляем все призраки
         foreach (var g in activeMoveHighlights)
         {
             if (g != null)
@@ -341,6 +380,7 @@ public class Board3DView : MonoBehaviour
         }
         activeMoveHighlights.Clear();
     }
+
     private void PaintGhost(GameObject ghost, bool canMove)
     {
         if (ghost == null) return;
@@ -359,12 +399,10 @@ public class Board3DView : MonoBehaviour
 
     private void HighlightTile(int x, int y, bool canMove)
     {
-        // логика — сюда можно ходить или нет
         var tw = tileWorlds[x, y];
         if (tw != null)
             tw.canMoveTarget = canMove;
 
-        // визуал
         if (moveHighlightPrefab == null) return;
 
         var anchor = anchors[x, y];
@@ -379,6 +417,7 @@ public class Board3DView : MonoBehaviour
         PaintGhost(ghost, canMove);
         activeMoveHighlights.Add(ghost);
     }
+
     private void HighlightStart(bool canMove)
     {
         if (startTileWorld != null)
@@ -409,15 +448,14 @@ public class Board3DView : MonoBehaviour
 
     private void ShowMovesFromStart()
     {
-        // Маг на старте, единственный возможный ход — в клетку (2,0) над стартом
         int x = 2;
         int y = 0;
 
         TileInstance neighbor = board.Get(x, y);
         if (neighbor == null)
-            return; // комнаты ещё нет
+            return;
 
-        bool fromPath = startTileInstance != null ? startTileInstance.Connections.Up : false;
+        bool fromPath = startTileInstance != null && startTileInstance.Connections.Up;
         bool toPath = neighbor.Connections.Down;
 
         bool canMove = fromPath && toPath;
@@ -433,7 +471,7 @@ public class Board3DView : MonoBehaviour
 
         Sockets curSockets = current.Connections;
 
-        foreach (Side side in System.Enum.GetValues(typeof(Side)))
+        foreach (Side side in Enum.GetValues(typeof(Side)))
         {
             Vector2Int off = side.Offset();
             int nx = mageX + off.x;
@@ -457,7 +495,7 @@ public class Board3DView : MonoBehaviour
 
             TileInstance neighbor = board.Get(nx, ny);
             if (neighbor == null)
-                continue; // нет комнаты — не подсвечиваем
+                continue;
 
             bool fromPath = curSockets.Get(side);
             Side opposite = SideUtil.Opposite(side);
@@ -468,20 +506,15 @@ public class Board3DView : MonoBehaviour
         }
     }
 
-
     public void OnTileClicked(TileWorld tile)
     {
         if (tile == null || !tile.canMoveTarget)
-            return; // клики по непроходимым/несветящимся игнорируем
+            return;
 
         if (tile.isStart)
-        {
             MoveMageToStart();
-        }
         else
-        {
             MoveMageToCell(tile.x, tile.y);
-        }
     }
 
     private void MoveMageToCell(int x, int y)
@@ -498,6 +531,12 @@ public class Board3DView : MonoBehaviour
         }
 
         ClearHighlights();
+
+        // Проверяем: наступили ли на Sanctum, чтобы забрать Гримуар
+        if (!mageHasGrimoire && sanctumRevealed && IsSanctumCell(x, y))
+        {
+            PickupGrimoireAndReplaceSanctum();
+        }
     }
 
     private void MoveMageToStart()
@@ -511,35 +550,40 @@ public class Board3DView : MonoBehaviour
         }
 
         ClearHighlights();
-    }
 
-
-    private void Start()
-    {
-        RefreshStartTileVisual();  // <-- новый метод вместо SpawnStartTileVisual
-        SpawnMage();
-    }
-
-
-    private void SpawnStartTileVisual()
-    {
-        if (startTileDefinition == null ||
-            startTileDefinition.WorldPrefab == null ||
-            startCellAnchor == null)
+        // Проверка победы: маг вернулся на старт С ГРИМУАРОМ
+        if (mageHasGrimoire && !GameWon)
         {
-            Debug.LogWarning("StartTileDefinition или startCellAnchor не настроены в Board3DView");
+            GameWon = true;
+            Debug.Log("[Game] ПОБЕДА: маг вернулся на старт с Гримуаром!");
+            // Здесь позже можно вызвать событие / показать UI и т.п.
+        }
+    }
+
+    #endregion
+
+    #region Стартовый тайл
+
+    private void RefreshStartTileVisual()
+    {
+        if (startCellAnchor == null || startTileDefinition == null)
             return;
+
+        if (startTileWorld != null && startTileWorld.gameObject != null)
+            Destroy(startTileWorld.gameObject);
+
+        TileDefinition defToUse = startTileDefinition;
+
+        if (startTileBlockedDefinition != null &&
+            (startTileInstance == null || !startTileInstance.Connections.Up))
+        {
+            defToUse = startTileBlockedDefinition;
         }
 
-        // Берём МИРОВУЮ позицию Cell_Start, но НЕ делаем префаб его дочкой
-        Vector3 worldPos = startCellAnchor.position;
-
-        var go = Instantiate(startTileDefinition.WorldPrefab,
-                         startCellAnchor.position,
-                         Quaternion.identity,
-                         transform);
-
-        // ...
+        var go = Instantiate(defToUse.WorldPrefab,
+                             startCellAnchor.position,
+                             Quaternion.identity,
+                             transform);
 
         var tw = go.GetComponent<TileWorld>();
         if (tw == null) tw = go.AddComponent<TileWorld>();
@@ -550,15 +594,12 @@ public class Board3DView : MonoBehaviour
         tw.y = 0;
 
         startTileWorld = tw;
-
-        // Доп. поворот, если надо развернуть "дверь" вверх
-        // (можно сделать публичное поле startTileRotationY, если хочешь крутить в инспекторе)
-        // go.transform.rotation = Quaternion.Euler(0f, startTileRotationY, 0f);
     }
 
-    /// <summary>
-    /// Проверка, можно ли поставить тайл на клетку, без изменения модели.
-    /// </summary>
+    #endregion
+
+    #region Постановка тайлов + превью
+
     public bool CanPlaceTile(TileDefinition def, Rotation rot, int x, int y)
     {
         if (def == null)
@@ -573,14 +614,9 @@ public class Board3DView : MonoBehaviour
         return PlacementValidator.CanPlace(board, startTileInstance, x, y, def, rot);
     }
 
-    /// <summary>
-    /// Попытаться поставить тайл по правилам; при успехе обновляет модель и спавнит реальный тайл.
-    /// </summary>
-
     public bool TryPlaceTile(TileDefinition def, Rotation rot, int x, int y)
     {
-        bool canPlace = PlacementValidator.CanPlace(board, startTileInstance, x, y, def, rot); // <-- передаём стартовый тайл
-
+        bool canPlace = PlacementValidator.CanPlace(board, startTileInstance, x, y, def, rot);
         if (!canPlace)
             return false;
 
@@ -588,30 +624,12 @@ public class Board3DView : MonoBehaviour
         board.Set(x, y, instance);
 
         SpawnTileWorld(def, rot, x, y);
-
         HidePreview();
 
-        // НОВОЕ: сообщаем системе Гримуара, что мы поставили тайл
         HandleSanctumAfterPlacement(x, y, instance);
-
-        // если у тебя есть логика скрытия превью — её оставь
-        // HidePreview();
 
         return true;
     }
-
-
-    /*public bool TryPlaceTile(TileDefinition def, Rotation rot, int x, int y)
-    {
-        if (!PlacementValidator.CanPlace(board, x, y, def, rot))
-            return false;
-
-        board.Set(x, y, new TileInstance(def, rot));
-        SpawnTileWorld(def, rot, x, y);
-        HidePreview();
-
-        return true;
-    }*/
 
     private void SpawnTileWorld(TileDefinition def, Rotation rot, int x, int y)
     {
@@ -628,12 +646,10 @@ public class Board3DView : MonoBehaviour
             return;
         }
 
-        // Сносим старый визуал, если был
         var oldTw = tileWorlds[x, y];
         if (oldTw != null && oldTw.gameObject != null)
             Destroy(oldTw.gameObject);
 
-        // Создаём новый
         var go = Instantiate(
             def.WorldPrefab,
             anchor.position,
@@ -651,21 +667,11 @@ public class Board3DView : MonoBehaviour
         tileWorlds[x, y] = tw;
     }
 
-
-
-
-    /// <summary>
-    /// Обновляет/показывает призрачный тайл на клетке (x,y).
-    /// </summary>
     public void UpdatePreview(TileDefinition def, Rotation rot, int x, int y, bool canPlace)
     {
-        if (def == null)
-        {
-            HidePreview();
-            return;
-        }
-
-        if (x < 0 || x >= BoardModel.Width || y < 0 || y >= BoardModel.Height)
+        if (def == null ||
+            x < 0 || x >= BoardModel.Width ||
+            y < 0 || y >= BoardModel.Height)
         {
             HidePreview();
             return;
@@ -678,7 +684,6 @@ public class Board3DView : MonoBehaviour
             return;
         }
 
-        // если нет превью или деф сменился – создаём новый призрак
         if (previewGO == null || previewDef != def)
         {
             if (previewGO != null)
@@ -687,23 +692,21 @@ public class Board3DView : MonoBehaviour
             previewGO = Instantiate(def.WorldPrefab, anchor.position, Quaternion.identity, transform);
             previewDef = def;
 
-            // создаём или перенастраиваем оверлей
             CreateOrSetupOverlay();
         }
 
-        // позиция и поворот такие же, как у реального тайла
         previewGO.transform.position = anchor.position;
 
         float yRot = baseRotationY + (int)rot;
         previewGO.transform.rotation = Quaternion.Euler(0f, yRot, 0f);
         previewGO.transform.position += previewGO.transform.TransformVector(tilePositionOffset);
 
-        // обновляем оверлей (цвет и положение)
         if (previewOverlayGO != null)
         {
             previewOverlayGO.transform.localPosition = new Vector3(0f, previewOverlayHeight, 0f);
             previewOverlayGO.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            previewOverlayGO.transform.localScale = new Vector3(previewOverlayScale, previewOverlayScale, previewOverlayScale);
+            previewOverlayGO.transform.localScale =
+                new Vector3(previewOverlayScale, previewOverlayScale, previewOverlayScale);
 
             var rend = previewOverlayGO.GetComponent<Renderer>();
             if (rend != null)
@@ -729,7 +732,6 @@ public class Board3DView : MonoBehaviour
             previewOverlayGO.name = "PreviewOverlay";
             previewOverlayGO.transform.SetParent(previewGO.transform, false);
 
-            // коллайдер от квадрата нам не нужен
             var col = previewOverlayGO.GetComponent<Collider>();
             if (col != null) Destroy(col);
         }
@@ -742,10 +744,12 @@ public class Board3DView : MonoBehaviour
     public void HidePreview()
     {
         if (previewGO != null)
-        {
             previewGO.SetActive(false);
-        }
     }
+
+    #endregion
+
+    #region Вспомогалки для сокетов/поворотов
 
     private void SetConnection(TileInstance tile, Side side, bool value)
     {
@@ -779,73 +783,61 @@ public class Board3DView : MonoBehaviour
             default: return Rotation.R0;
         }
     }
+
+    private static Sockets RotateSockets(Sockets s, int steps)
+    {
+        steps = ((steps % 4) + 4) % 4;
+
+        for (int i = 0; i < steps; i++)
+        {
+            bool up = s.Up;
+            s.Up = s.Left;
+            s.Left = s.Down;
+            s.Down = s.Right;
+            s.Right = up;
+        }
+
+        return s;
+    }
+
+    private static bool SameSockets(Sockets a, Sockets b)
+    {
+        return a.Up == b.Up
+            && a.Right == b.Right
+            && a.Down == b.Down
+            && a.Left == b.Left;
+    }
+
+    #endregion
+
+    #region Магия камня
+
     /// <summary>
-    /// Магия камня: переключить проход между клеткой, где стоит маг,
-    /// и соседней клеткой по указанной стороне.
+    /// Магия камня по направлению от мага (для кнопок на панели и т.п.).
+    /// Внутри просто пересчитывает целевую клетку и зовёт TryCastStoneOnCell.
     /// </summary>
     public bool TryCastStone(Side side)
     {
-        TileInstance current;
-        int cx, cy;
+        int tx, ty;
 
         if (mageOnStart)
         {
-            // Маг на стартовом тайле: логическая клетка над ним (2,0).
-            // По правилам старт имеет только проход ВВЕРХ.
             if (side != Side.Up)
                 return false;
 
-            current = startTileInstance;
-            cx = 2;
-            cy = 0;
+            tx = 2;
+            ty = 0;
         }
         else
         {
-            current = board.Get(mageX, mageY);
-            cx = mageX;
-            cy = mageY;
+            Vector2Int off = side.Offset();
+            tx = mageX + off.x;
+            ty = mageY + off.y;
         }
 
-        if (current == null)
-            return false;
-
-        Vector2Int off = side.Offset();
-        int nx = cx + off.x;
-        int ny = cy + off.y;
-
-        // Стены края подземелья ломать нельзя
-        if (!board.IsInside(nx, ny))
-            return false;
-
-        TileInstance neighbor = board.Get(nx, ny);
-        if (neighbor == null)
-            return false; // камень работает только между существующими комнатами
-
-        bool curEdge = current.Connections.Get(side);
-        Side opposite = SideUtil.Opposite(side);
-        bool neighEdge = neighbor.Connections.Get(opposite);
-
-        // Проход есть только если пути с обеих сторон
-        bool isOpenNow = curEdge && neighEdge;
-        bool newState = !isOpenNow; // инверсия
-
-        SetConnection(current, side, newState);
-        SetConnection(neighbor, opposite, newState);
-
-        // если сосед — гримуар, обновляем его сокеты
-        if (neighbor == sanctumInstance)
-            SetSanctumSocket(opposite, newState);
-
-        ClearHighlights(); // ходы мага изменились
-
-        return true;
+        return TryCastStoneOnCell(tx, ty);
     }
-    /// <summary>
-    /// Магия камня по клетке: карта была брошена на клетку (tx,ty).
-    /// </summary>
-    /// <summary>
-    /// Магия камня: переключает стену между клеткой под магом и целевой клеткой (x,y).
-    /// </summary>
+
     /// <summary>
     /// Магия камня: переключает стену между комнатой под магом и соседней клеткой (x,y).
     /// Плюс спец-случай для связи START ↔ (2,0).
@@ -853,7 +845,6 @@ public class Board3DView : MonoBehaviour
     public bool TryCastStoneOnCell(int x, int y)
     {
         // === 0. Маг стоит на старте ===
-        // Камнем можно воздействовать только на клетку (2,0).
         if (mageOnStart)
         {
             if (x == 2 && y == 0)
@@ -862,8 +853,6 @@ public class Board3DView : MonoBehaviour
             Debug.Log("[Stone] На старте камнем можно воздействовать только на клетку (2,0).");
             return false;
         }
-
-        // === 1. Маг внутри подземелья ===
 
         if (!board.IsInside(x, y))
             return false;
@@ -875,7 +864,6 @@ public class Board3DView : MonoBehaviour
             return false;
         }
 
-        // Определяем направление от мага к цели
         int dx = x - mageX;
         int dy = y - mageY;
 
@@ -895,17 +883,13 @@ public class Board3DView : MonoBehaviour
         // === 1.A. Если целевая клетка — SANCTUM ===
         if (IsSanctumCell(x, y))
         {
-            // Здесь работаем не через TileInstance, а напрямую с sanctumSockets
             Side opposite = SideUtil.Opposite(side);
 
             bool curEdge = curSockets.Get(side);
             bool sanctumEdge = sanctumSockets.Get(opposite);
 
-            // Логика та же: если хотя бы у одной стороны был путь – закрываем,
-            // если обе были стеной – открываем.
             bool newEdge = !(curEdge || sanctumEdge);
 
-            // Записываем в комнату мага
             switch (side)
             {
                 case Side.Up: curSockets.Up = newEdge; break;
@@ -914,7 +898,6 @@ public class Board3DView : MonoBehaviour
                 case Side.Left: curSockets.Left = newEdge; break;
             }
 
-            // И в sanctumSockets (сторона, смотрящая на мага)
             switch (opposite)
             {
                 case Side.Up: sanctumSockets.Up = newEdge; break;
@@ -925,30 +908,24 @@ public class Board3DView : MonoBehaviour
 
             current.Connections = curSockets;
 
-            // Если Sanctum уже раскрыт, у него есть sanctumInstance и 3D-модель
             if (sanctumInstance != null)
                 sanctumInstance.Connections = sanctumSockets;
 
             if (sanctumRevealed)
-                RefreshSanctumVisual(); // переcобирает только визуал Sanctum
+                RefreshSanctumVisual();
 
-            // Перерисуем комнату под магом
             RebuildTileVisual(mageX, mageY);
 
             Debug.Log($"[Stone] Между комнатой ({mageX},{mageY}) и SANCTUM ({x},{y}) проход: {(newEdge ? "есть" : "нет")}.");
             return true;
         }
 
-        // === 1.B. Обычные клетки (с тайлом или пустые) ===
-
+        // === 1.B. Целевая клетка пустая ===
         TileInstance neighbor = board.Get(x, y);
-
-        // --- СЛУЧАЙ: целевая клетка пустая ---
         if (neighbor == null)
         {
-            // Меняем только сторону комнаты под магом.
             bool curEdge = curSockets.Get(side);
-            bool newEdge = !curEdge; // просто инвертируем путь/стену
+            bool newEdge = !curEdge;
 
             switch (side)
             {
@@ -959,29 +936,21 @@ public class Board3DView : MonoBehaviour
             }
 
             current.Connections = curSockets;
-
             RebuildTileVisual(mageX, mageY);
 
-            Debug.Log($"[Stone] Клетка ({x},{y}) пуста, " +
-                      $"сторона {side} у комнаты ({mageX},{mageY}) теперь {(newEdge ? "ПУТЬ" : "СТЕНА")}.");
-
-            // Это как раз твой пункт 4: можно заранее «подготовить» стену/проход
-            // для будущего строительства.
+            Debug.Log($"[Stone] Клетка ({x},{y}) пуста, сторона {side} у ({mageX},{mageY}) теперь {(newEdge ? "ПУТЬ" : "СТЕНА")}.");
             return true;
         }
 
-        // --- СЛУЧАЙ: обычная соседняя комната ---
-
+        // === 1.C. Обычная соседняя комната ===
         Sockets nbSockets = neighbor.Connections;
 
         bool curEdge2 = curSockets.Get(side);
         Side opposite2 = SideUtil.Opposite(side);
         bool nbEdge2 = nbSockets.Get(opposite2);
 
-        // Если хоть у кого-то есть путь — делаем стены, если оба стены — открываем
         bool newEdge2 = !(curEdge2 || nbEdge2);
 
-        // Записываем в текущую комнату
         switch (side)
         {
             case Side.Up: curSockets.Up = newEdge2; break;
@@ -990,7 +959,6 @@ public class Board3DView : MonoBehaviour
             case Side.Left: curSockets.Left = newEdge2; break;
         }
 
-        // И в соседа (с противоположной стороны)
         switch (opposite2)
         {
             case Side.Up: nbSockets.Up = newEdge2; break;
@@ -1004,26 +972,17 @@ public class Board3DView : MonoBehaviour
 
         Debug.Log($"[Stone] Между клетками ({mageX},{mageY}) и ({x},{y}) теперь проход: {(newEdge2 ? "есть" : "нет")}.");
 
-        // Перерисуем только эти две комнаты
         RebuildTileVisual(mageX, mageY);
         RebuildTileVisual(x, y);
 
         return true;
     }
 
-
-
-    /// <summary>
-    /// Магия камня: переключает проход между стартовым тайлом и клеткой (2,0).
-    /// Работает, только если маг стоит на старте или на клетке (2,0).
-    /// </summary>
     /// <summary>
     /// Магия камня: переключает проход между стартом и клеткой (2,0).
-    /// Работает, только если маг на старте или на (2,0).
     /// </summary>
     public bool TryCastStoneBetweenStartAndFirstCell()
     {
-        // маг должен быть либо на старте, либо на (2,0)
         bool mageHere =
             mageOnStart ||
             (!mageOnStart && mageX == 2 && mageY == 0);
@@ -1047,14 +1006,12 @@ public class Board3DView : MonoBehaviour
             return false;
         }
 
-        // читаем текущие соединения
         Sockets startSockets = startTileInstance.Connections;
         Sockets cellSockets = cell20.Connections;
 
-        bool edgeStart = startSockets.Up;   // у старта вход/выход вверх
-        bool edgeCell = cellSockets.Down;  // у клетки (2,0) вход/выход вниз
+        bool edgeStart = startSockets.Up;
+        bool edgeCell = cellSockets.Down;
 
-        // если где-то есть путь — делаем стену, если стенка с обеих сторон — открываем путь
         bool newEdge = !(edgeStart || edgeCell);
 
         startSockets.Up = newEdge;
@@ -1063,18 +1020,22 @@ public class Board3DView : MonoBehaviour
         startTileInstance.Connections = startSockets;
         cell20.Connections = cellSockets;
 
-
         Debug.Log($"[Stone] Стена между START и (2,0) теперь: {(newEdge ? "открыта (путь есть)" : "закрыта (стена)")}.");
+
+        // ОБНОВЛЯЕМ ВИЗУАЛ
+        RefreshStartTileVisual();
+        RebuildTileVisual(2, 0);
 
         return true;
     }
 
+    #endregion
 
-    // Магия воды: смывает комнату, оставляя пустую клетку,
-    // на которую потом можно снова строить по обычным правилам.
+    #region Магия воды
+
     public bool TryCastWaterOnCell(int x, int y)
     {
-        // 0. Нельзя лить воду на Sanctum ни в каком состоянии
+        // 0. Нельзя лить воду на Sanctum
         if (IsSanctumCell(x, y))
         {
             Debug.Log("[Water] Нельзя смывать Sanctum.");
@@ -1085,14 +1046,29 @@ public class Board3DView : MonoBehaviour
         if (!board.IsInside(x, y))
             return false;
 
-        // 2. Нельзя смывать комнату, в которой стоит маг
+        // 2. Определяем «центр» дальности – откуда колдуем
+        //    Если маг на старте, считаем что он колдует из клетки (2,0)
+        int centerX = mageOnStart ? 2 : mageX;
+        int centerY = mageOnStart ? 0 : mageY;
+
+        int dx = x - centerX;
+        int dy = y - centerY;
+
+        // Можно только по соседним клеткам по горизонтали / вертикали / диагонали
+        if (Mathf.Abs(dx) > 1 || Mathf.Abs(dy) > 1)
+        {
+            Debug.Log("[Water] Можно смывать только соседние клетки вокруг мага.");
+            return false;
+        }
+
+        // 3. Нельзя смывать комнату, на которой СТОИТ маг
         if (!mageOnStart && mageX == x && mageY == y)
         {
             Debug.Log("[Water] Нельзя смывать комнату под магом.");
             return false;
         }
 
-        // 3. Берём тайл из модели
+        // 4. Берём тайл из модели
         TileInstance tile = board.Get(x, y);
         if (tile == null)
         {
@@ -1100,38 +1076,34 @@ public class Board3DView : MonoBehaviour
             return false;
         }
 
-        // 4. Очищаем модель: клетка считается ПУСТОЙ
+        // 5. Очищаем модель: клетка становится пустой
         board.Set(x, y, null);
 
-        // 5. Обновляем визуал только этой клетки
+        // 6. Обновляем визуал только этой клетки
         RebuildTileVisual(x, y);
 
         Debug.Log($"[Water] Клетка ({x},{y}) смыта. Теперь она пустая и по правилам можно строить заново.");
         return true;
     }
 
+    #endregion
 
-    /// <summary>
-    /// Магия воздуха: если карта брошена по тайлу/клетке, где стоит маг,
-    /// показываем подсветку возможных ходов (как при клике по магу).
-    /// </summary>
+    #region Магия воздуха
+
     public bool TryCastAirOnMage()
     {
-        // Просто показываем возможные ходы
         OnMageClicked();
         return true;
     }
 
     public bool TryCastAirOnCell(int x, int y)
     {
-        // Если маг стоит на этой клетке — то же самое, что TryCastAirOnMage
         if (!mageOnStart && mageX == x && mageY == y)
         {
             OnMageClicked();
             return true;
         }
 
-        // Если маг на старте, а целевая клетка (2,0) — тоже считаем, что попали по магу
         if (mageOnStart && x == 2 && y == 0)
         {
             OnMageClicked();
@@ -1141,25 +1113,22 @@ public class Board3DView : MonoBehaviour
         return false;
     }
 
-    /// <summary>
-    /// Магия воздуха: если карту бросили прямо на модель мага.
-    /// </summary>
+    #endregion
 
+    #region Магия огня
 
     /// <summary>
-    /// Магия огня по координатам поля.
-    /// Сейчас работает только если это клетка, где стоит маг.
+    /// Магия огня по координатам поля (используется картой).
     /// </summary>
     public bool TryCastFireOnCell(int x, int y)
     {
         if (!board.IsInside(x, y))
             return false;
 
-        // ===== 1. SANCTUM =====
+        // ===== 1. ОГОНЬ ПО SANCTUM =====
         if (IsSanctumCell(x, y))
         {
-            // Я предлагаю крутить только открытый Sanctum.
-            // Если хочешь, можно убрать эту проверку и крутить скрытый тоже.
+            // Крутим только уже раскрытый Sanctum
             if (!sanctumRevealed)
                 return false;
 
@@ -1168,29 +1137,10 @@ public class Board3DView : MonoBehaviour
             int dir = UnityEngine.Random.value < 0.5f ? 1 : -1;
             int totalSteps = steps * dir;
 
-            // Поворачиваем именно sanctumSockets
+            // Поворачиваем sanctumSockets
             Sockets s = RotateSockets(sanctumSockets, totalSteps);
 
-            // Не даём выходам уходить за край поля
-            foreach (Side side in System.Enum.GetValues(typeof(Side)))
-            {
-                Vector2Int off = side.Offset();
-                int nx = x + off.x;
-                int ny = y + off.y;
-
-                if (s.Get(side) && !board.IsInside(nx, ny))
-                {
-                    switch (side)
-                    {
-                        case Side.Up: s.Up = false; break;
-                        case Side.Right: s.Right = false; break;
-                        case Side.Down: s.Down = false; break;
-                        case Side.Left: s.Left = false; break;
-                    }
-                }
-            }
-
-            // Сохраняем новые сокеты Sanctum
+            // НЕ режем выходы за край поля — путь может смотреть в "стену мира"
             sanctumSockets = s;
             if (sanctumInstance != null)
                 sanctumInstance.Connections = sanctumSockets;
@@ -1211,8 +1161,8 @@ public class Board3DView : MonoBehaviour
 
                 Side opp = SideUtil.Opposite(side);
                 bool edge = sanctumSockets.Get(side);
-
                 Sockets nbSockets = nb.Connections;
+
                 switch (opp)
                 {
                     case Side.Up: nbSockets.Up = edge; break;
@@ -1225,12 +1175,11 @@ public class Board3DView : MonoBehaviour
                 RebuildTileVisual(nx, ny);
             }
 
-            // Обновляем именно визуал Sanctum, не обычный тайл
             RefreshSanctumVisual();
             return true;
         }
 
-        // ===== 2. ОБЫЧНЫЙ ТАЙЛ =====
+        // ===== 2. ОГОНЬ ПО ОБЫЧНОМУ ТАЙЛУ =====
 
         TileInstance tile = board.Get(x, y);
         if (tile == null)
@@ -1244,44 +1193,66 @@ public class Board3DView : MonoBehaviour
         // крутим ТЕКУЩИЕ сокеты (с учётом камня)
         Sockets after = RotateSockets(tile.Connections, totalStepsTile);
 
-        // режем выходы за границу поля
+        // НЕ режем выходы за край поля — путь может смотреть в край доски
+        bool sanctumSideTouched = false;
+
+        // Подгоняем соседей
         foreach (Side side in System.Enum.GetValues(typeof(Side)))
         {
             Vector2Int off = side.Offset();
             int nx = x + off.x;
             int ny = y + off.y;
 
-            if (after.Get(side) && !board.IsInside(nx, ny))
+            bool edge = after.Get(side);
+            Side opp = SideUtil.Opposite(side);
+
+            // --- ОСОБЫЙ СЛУЧАЙ: сосед — СТАРТОВЫЙ ТАЙЛ ПОД (2,0) ---
+            // Старт логически находится под клеткой (2,0) на стороне Down.
+            if (x == 2 && y == 0 && side == Side.Down)
             {
-                switch (side)
+                if (startTileInstance != null)
                 {
-                    case Side.Up: after.Up = false; break;
-                    case Side.Right: after.Right = false; break;
-                    case Side.Down: after.Down = false; break;
-                    case Side.Left: after.Left = false; break;
+                    var startSockets = startTileInstance.Connections;
+                    // У старта единственная сторона, которая нас интересует — Up.
+                    startSockets.Up = edge;
+                    startTileInstance.Connections = startSockets;
+
+                    // Обновляем визуал старта (обычный/заблокированный)
+                    RefreshStartTileVisual();
                 }
+
+                // Для этой стороны дальше никого не трогаем
+                continue;
             }
-        }
 
-        // Подгоняем соседей (Sanctum здесь пропускаем — он уже
-        // обрабатывается отдельно, когда огонь кидаем в сам Sanctum)
-        foreach (Side side in System.Enum.GetValues(typeof(Side)))
-        {
-            Vector2Int off = side.Offset();
-            int nx = x + off.x;
-            int ny = y + off.y;
-
+            // --- обычные границы поля ---
             if (!board.IsInside(nx, ny))
                 continue;
-            if (IsSanctumCell(nx, ny))
-                continue;
 
+            // --- СЛУЧАЙ: сосед — SANCTUM ---
+            if (IsSanctumCell(nx, ny))
+            {
+                // Обновляем sanctumSockets так, чтобы дверь Sanctum
+                // совпадала с новой стороной текущего тайла
+                switch (opp)
+                {
+                    case Side.Up: sanctumSockets.Up = edge; break;
+                    case Side.Right: sanctumSockets.Right = edge; break;
+                    case Side.Down: sanctumSockets.Down = edge; break;
+                    case Side.Left: sanctumSockets.Left = edge; break;
+                }
+
+                if (sanctumInstance != null)
+                    sanctumInstance.Connections = sanctumSockets;
+
+                sanctumSideTouched = true;
+                continue; // не перерисовываем Sanctum как обычный тайл
+            }
+
+            // --- СЛУЧАЙ: обычный соседний тайл ---
             TileInstance nb = board.Get(nx, ny);
             if (nb == null)
                 continue;
-
-            Side opp = SideUtil.Opposite(side);
-            bool edge = after.Get(side);
 
             Sockets nbSockets = nb.Connections;
             switch (opp)
@@ -1296,7 +1267,11 @@ public class Board3DView : MonoBehaviour
             RebuildTileVisual(nx, ny);
         }
 
-        // сохраняем новые сокеты самого тайла и перерисовываем его
+        // Если изменили хотя бы одну сторону Sanctum — перерисуем его
+        if (sanctumSideTouched)
+            RefreshSanctumVisual();
+
+        // Сохраняем новые сокеты самого тайла и перерисовываем его
         tile.Connections = after;
         RebuildTileVisual(x, y);
 
@@ -1304,30 +1279,11 @@ public class Board3DView : MonoBehaviour
     }
 
 
-    private static Sockets RotateSockets(Sockets s, int steps)
-    {
-        // нормализуем шаги к [0..3]
-        steps = ((steps % 4) + 4) % 4;
-
-        for (int i = 0; i < steps; i++)
-        {
-            // поворот по часовой стрелке:
-            // Up -> Right -> Down -> Left -> Up
-            bool up = s.Up;
-            s.Up = s.Left;
-            s.Left = s.Down;
-            s.Down = s.Right;
-            s.Right = up;
-        }
-
-        return s;
-    }
-
 
 
     /// <summary>
-    /// Магия огня: поворачивает комнату под магом на 90° по часовой
-    /// и обновляет соединения с соседями.
+    /// Огонь "под магом" (если вдруг где-то вызывается напрямую из кода).
+    /// Просто прокидываем в TryCastFireOnCell.
     /// </summary>
     public bool TryCastFireOnCurrent()
     {
@@ -1340,94 +1296,13 @@ public class Board3DView : MonoBehaviour
         if (!board.IsInside(mageX, mageY))
             return false;
 
-        TileInstance current = board.Get(mageX, mageY);
-        if (current == null)
-        {
-            Debug.Log("[Fire] Под магом нет комнаты, огонь не сработал.");
-            return false;
-        }
-
-        // Поворачиваем тайл на 90° по часовой
-        int newRot = ((int)current.Rot + 90) % 360;
-        current.Rot = (Rotation)newRot;
-
-        // Пересчитываем сокеты на основе определения тайла
-        if (current.Def != null)
-        {
-            current.Connections = current.Def.GetSockets(current.Rot);
-        }
-
-        // Теперь приводим соседей в соответствие с новым положением
-        Sockets curSockets = current.Connections;
-
-        foreach (Side side in System.Enum.GetValues(typeof(Side)))
-        {
-            Vector2Int off = side.Offset();
-            int nx = mageX + off.x;
-            int ny = mageY + off.y;
-
-            if (!board.IsInside(nx, ny))
-                continue;
-
-            TileInstance neighbor = board.Get(nx, ny);
-            if (neighbor == null)
-                continue;
-
-            Sockets nbSockets = neighbor.Connections;
-
-            bool ourEdge = curSockets.Get(side);
-            Side opposite = SideUtil.Opposite(side);
-            bool nbEdge = nbSockets.Get(opposite);
-
-            // Если сосед не совпадает с нашим новым путём — делаем его таким же
-            if (ourEdge != nbEdge)
-            {
-                switch (opposite)
-                {
-                    case Side.Up: nbSockets.Up = ourEdge; break;
-                    case Side.Right: nbSockets.Right = ourEdge; break;
-                    case Side.Down: nbSockets.Down = ourEdge; break;
-                    case Side.Left: nbSockets.Left = ourEdge; break;
-                }
-
-                neighbor.Connections = nbSockets;
-
-             
-            }
-        }
-
-        Debug.Log($"[Fire] Повернули комнату под магом в ({mageX},{mageY}) до Rot={current.Rot}.");
-
-        RebuildAllTilesFromModel();
-        return true;
-
+        return TryCastFireOnCell(mageX, mageY);
     }
 
-    private static bool SameSockets(Sockets a, Sockets b)
-    {
-        return a.Up == b.Up
-            && a.Right == b.Right
-            && a.Down == b.Down
-            && a.Left == b.Left;
-    }
+    #endregion
 
-    // --- Подбор формы и поворота по текущим Connections ---
-    /// <summary>
-    /// По набору сокетов выбираем форму тайла (Cross/Tee/Turn/Straight/DeadEnd/Blocked)
-    /// и нужный поворот.
-    /// ВАЖНО: TileDefinitions настроены так:
-    /// - crossDef: Up,Right,Down,Left = true
-    /// - teeDef:   Up,Right,Left = true, Down = false
-    /// - cornerDef (Turn): Up,Right = true, Down,Left = false
-    /// - straightDef: Up,Down = true, Right,Left = false
-    /// - deadEndDef: только Down = true
-    /// - blockedDef: все false
-    /// </summary>
-    /// <summary>
-    /// По набору сокетов (Up/Right/Down/Left) подбирает подходящий TileDefinition
-    /// и поворот, перебирая ВСЕ формы и ВСЕ 4 поворота.
-    /// Больше не зависит от того, как именно ты повернул модели.
-    /// </summary>
+    #region Авто-подбор формы тайла по сокетам
+
     private bool TryPickShapeBySockets(
         Sockets sockets,
         out TileDefinition resultDef,
@@ -1436,25 +1311,22 @@ public class Board3DView : MonoBehaviour
         resultDef = null;
         resultRot = Rotation.R0;
 
-        // Набор всех форм подземелья
         TileDefinition[] shapes =
         {
-        tileCrossDef,
-        tileStraightDef,
-        tileTurnDef,
-        tileTeeDef,
-        tileDeadEndDef,
-        tileBlockedDef
-    };
+            tileCrossDef,
+            tileStraightDef,
+            tileTurnDef,
+            tileTeeDef,
+            tileDeadEndDef,
+            tileBlockedDef
+        };
 
         foreach (var def in shapes)
         {
             if (def == null)
                 continue;
 
-            // Перебираем все 4 поворота и спрашиваем сам TileDefinition,
-            // какие сокеты будут при таком повороте.
-            foreach (Rotation rot in System.Enum.GetValues(typeof(Rotation)))
+            foreach (Rotation rot in Enum.GetValues(typeof(Rotation)))
             {
                 Sockets s = def.GetSockets(rot);
 
@@ -1467,82 +1339,14 @@ public class Board3DView : MonoBehaviour
             }
         }
 
-        // Ничего не нашли – пусть вызывающий код решает, что делать.
         return false;
     }
 
-
-
-    // --- Полная пересборка всех 25 тайлов из модели board ---
-    private void RebuildAllTilesFromModel()
-    {
-        if (board == null)
-            return;
-
-        for (int x = 0; x < BoardModel.Width; x++)
-        {
-            for (int y = 0; y < BoardModel.Height; y++)
-            {
-                if (IsSanctumCell(x, y))
-                    continue;
-
-                RebuildTileVisual(x, y);
-            }
-        }
-
-        if (sanctumRevealed)
-            RefreshSanctumVisual();
-    }
-
-    private bool IsSanctumCell(int x, int y)
-    {
-        return x == sanctumX && y == sanctumY;
-    }
-
-    private void RefreshSanctumVisual()
-    {
-        if (!sanctumRevealed)
-            return;
-
-        var anchor = anchors[sanctumX, sanctumY];
-        if (anchor == null)
-        {
-            Debug.LogWarning("[Sanctum] Anchor для Sanctum не найден");
-            return;
-        }
-
-        // Удаляем старый визуал, если был
-        if (sanctumWorldGO != null)
-        {
-            Destroy(sanctumWorldGO);
-            sanctumWorldGO = null;
-        }
-
-        GameObject prefab = GetSanctumPrefabForSockets(sanctumSockets);
-        if (prefab == null)
-        {
-            Debug.LogWarning("[Sanctum] Нет префаба для текущих sanctumSockets");
-            return;
-        }
-
-        sanctumWorldGO = Instantiate(prefab, anchor.position, Quaternion.identity, transform);
-
-        var tw = sanctumWorldGO.GetComponent<TileWorld>();
-        if (tw == null) tw = sanctumWorldGO.AddComponent<TileWorld>();
-
-        tw.board = this;
-        tw.x = sanctumX;
-        tw.y = sanctumY;
-        tw.isStart = false;
-
-        tileWorlds[sanctumX, sanctumY] = tw;
-    }
     private void RebuildTileVisual(int x, int y)
     {
         if (!board.IsInside(x, y))
             return;
 
-        // Санктум — через отдельный код
         if (IsSanctumCell(x, y))
         {
             if (sanctumRevealed)
@@ -1552,7 +1356,6 @@ public class Board3DView : MonoBehaviour
 
         TileInstance tile = board.Get(x, y);
 
-        // Пустая клетка — удаляем визуал
         if (tile == null)
         {
             var oldTw = tileWorlds[x, y];
@@ -1574,40 +1377,6 @@ public class Board3DView : MonoBehaviour
 
         SpawnTileWorld(def, rot, x, y);
     }
-    private void RefreshStartTileVisual()
-    {
-        if (startCellAnchor == null || startTileDefinition == null)
-            return;
 
-        // Удаляем старый визуал
-        if (startTileWorld != null && startTileWorld.gameObject != null)
-            Destroy(startTileWorld.gameObject);
-
-        // Какой префаб использовать — открытый или заблокированный
-        TileDefinition defToUse = startTileDefinition;
-
-        // Если есть отдельный "заблокированный" деф и вверх у старта закрыт
-        if (startTileBlockedDefinition != null &&
-            (startTileInstance == null || !startTileInstance.Connections.Up))
-        {
-            defToUse = startTileBlockedDefinition;
-        }
-
-        var go = Instantiate(defToUse.WorldPrefab,
-                             startCellAnchor.position,
-                             Quaternion.identity,
-                             transform);
-
-        var tw = go.GetComponent<TileWorld>();
-        if (tw == null) tw = go.AddComponent<TileWorld>();
-
-        tw.board = this;
-        tw.isStart = true;
-        tw.x = 2;
-        tw.y = 0;
-
-        startTileWorld = tw;
-    }
-
-
+    #endregion
 }

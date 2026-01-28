@@ -1561,6 +1561,7 @@ MonoBehaviour:
     left: 0
     prefab: {fileID: 6463908133431786693, guid: 8cd965601ae871f4d80f8e7eba415ce7, type: 3}
   startTileDefinition: {fileID: 11400000, guid: 24635ae4c6da2b84bb90b5cf6a728436, type: 2}
+  startTileBlockedDefinition: {fileID: 11400000, guid: 4c15ac69b5f04094384ce26f1c5a98d7, type: 2}
   startCellAnchor: {fileID: 3727004370680500987}
   tilePositionOffset: {x: 0, y: 0, z: 0}
   baseRotationY: 0
