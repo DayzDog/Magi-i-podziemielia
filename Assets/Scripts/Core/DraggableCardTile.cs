@@ -4,9 +4,6 @@ public class DraggableCardTile : MonoBehaviour
 {
     public TileDefinition tileDef;
     public Board3DView boardView;
-
-    [Header("Deck manager")]
-    [Tooltip("Сюда можно перетащить CardDeckManager (или оставить пустым, тогда найдётся автоматически).")]
     public CardDeckManager deckManager;
 
     [Header("Настройки перетаскивания")]
@@ -14,7 +11,7 @@ public class DraggableCardTile : MonoBehaviour
     public KeyCode rotateLeftKey = KeyCode.Q;
     public KeyCode rotateRightKey = KeyCode.E;
     [Range(0f, 1f)]
-    public float hoverCardAlpha = 0.3f; // прозрачность карты над полем (если захочешь использовать)
+    public float hoverCardAlpha = 0.3f; // прозрачность карты над полем
 
     private bool isDragging;
     private Vector3 startPos;
@@ -28,6 +25,7 @@ public class DraggableCardTile : MonoBehaviour
     // визуал карты
     private Renderer[] cardRenderers;
     private Color[] originalColors;
+    private Collider[] ownColliders;
 
     private void Awake()
     {
@@ -42,6 +40,8 @@ public class DraggableCardTile : MonoBehaviour
 
         if (deckManager == null)
             deckManager = FindFirstObjectByType<CardDeckManager>();
+
+        ownColliders = GetComponentsInChildren<Collider>();
 
         cardRenderers = GetComponentsInChildren<Renderer>();
         if (cardRenderers != null)
@@ -137,9 +137,7 @@ public class DraggableCardTile : MonoBehaviour
         startPos = transform.position;
         dragPlaneY = startPos.y;
         startRot = transform.rotation;
-        currentRotation = Rotation.R0;
         hoveredCell = null;
-
         boardView.HidePreview();
         SetCardVisible(true);
         SetCardAlpha(1f);
@@ -151,39 +149,63 @@ public class DraggableCardTile : MonoBehaviour
             return;
 
         isDragging = false;
+        bool used = false;
 
-        bool placed = false;
+        if (mainCam == null)
+            mainCam = Camera.main;
+        if (boardView == null)
+            boardView = FindFirstObjectByType<Board3DView>();
 
-        if (hoveredCell != null)
+        // Временно отключаем свои коллайдеры, чтобы raycast не попадал в карту
+        if (ownColliders != null)
+        {
+            foreach (var col in ownColliders)
+                if (col != null) col.enabled = false;
+        }
+
+        // 1) Проверяем, не бросили ли карту в зону сброса
+        Ray ray = mainCam.ScreenPointToRay(Input.mousePosition);
+        if (Physics.Raycast(ray, out RaycastHit hit, 200f))
+        {
+            var discard = hit.collider.GetComponentInParent<CardDiscardZone>();
+            if (discard != null &&
+                (discard.type == CardDiscardType.Dungeon ||
+                 discard.type == CardDiscardType.Both))
+            {
+                used = true; // карта ушла в сброс
+            }
+        }
+
+        // 2) Если не в сброс – пробуем поставить тайл
+        if (!used && hoveredCell != null)
         {
             bool canPlace = boardView.CanPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
             if (canPlace)
             {
-                placed = boardView.TryPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
+                used = boardView.TryPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
             }
         }
 
-        // Всегда убираем призрак
+        // Возвращаем коллайдеры
+        if (ownColliders != null)
+        {
+            foreach (var col in ownColliders)
+                if (col != null) col.enabled = true;
+        }
+
         boardView.HidePreview();
 
-        if (placed)
+        if (used)
         {
-            Debug.Log("[DungeonCard] Тайл успешно поставлен, карта считается израсходованной.");
-
+            // карта считается использованной (поставили тайл или сбросили)
             if (deckManager != null)
-            {
-                // Сообщаем дек-менеджеру, что эта карта использована
                 deckManager.OnDungeonCardUsed(gameObject);
-            }
             else
-            {
-                // На всякий случай, если дек не назначен
                 Destroy(gameObject);
-            }
         }
         else
         {
-            // Если НЕ удалось поставить – просто возвращаем карту на место
+            // никуда не попали и не смогли поставить — возвращаем в руку
             ResetCard();
         }
     }

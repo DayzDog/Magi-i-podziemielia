@@ -13,6 +13,11 @@ using UnityEngine;
 /// на указанные слоты. Новая пара выдаётся ТОЛЬКО когда обе
 /// карты соответствующего типа были использованы.
 /// Когда колода закончилась – новые карты больше не выдаются.
+///
+/// Дополнительно:
+/// - есть отдельный сброс для магии и отдельный сброс для тайлов.
+///   Туда попадают все использованные карты и карты, сброшенные
+///   игроком в зону сброса.
 /// </summary>
 public class CardDeckManager : MonoBehaviour
 {
@@ -35,7 +40,7 @@ public class CardDeckManager : MonoBehaviour
     [Serializable]
     public class DungeonCardEntry
     {
-        [Tooltip("Префаб карты тайла подземелья (на руках). На нём висит твой скрипт перетаскивания тайла.")]
+        [Tooltip("Префаб карты тайла подземелья (на руках). На нём висит DraggableCardTile.")]
         public GameObject cardPrefab;
 
         [Min(0)]
@@ -57,7 +62,7 @@ public class CardDeckManager : MonoBehaviour
     [Tooltip("Слоты (объекты в сцене), куда кладутся 2 карты подземелья.")]
     public Transform[] dungeonSlots = new Transform[2];
 
-    // ---------- ВНУТРЕННЕЕ СОСТОЯНИЕ ДЕКОВ ----------
+    // ---------- ДЕЙСТВУЮЩИЕ КОЛОДЫ ----------
 
     // реальные колоды (список «карт») после разворачивания по count
     private readonly List<SpellCardEntry> _spellDeck = new List<SpellCardEntry>();
@@ -66,6 +71,15 @@ public class CardDeckManager : MonoBehaviour
     // какие конкретные объекты карт сейчас лежат на столе в слотах
     private GameObject[] _activeSpellCards;
     private GameObject[] _activeDungeonCards;
+
+    // ---------- ОТДЕЛЬНЫЕ СБРОСЫ ----------
+
+    [Header("Discard piles (для дебага)")]
+    [SerializeField]
+    private List<SpellType> _spellDiscard = new List<SpellType>();
+
+    [SerializeField]
+    private List<TileDefinition> _dungeonDiscard = new List<TileDefinition>();
 
     private void Awake()
     {
@@ -145,21 +159,34 @@ public class CardDeckManager : MonoBehaviour
     // ---------- ПУБЛИЧНЫЕ МЕТОДЫ ДЛЯ КАРТ ----------
 
     /// <summary>
-    /// Вызывается картой заклинания, когда заклинание УСПЕШНО применено.
+    /// Вызывается картой заклинания, когда заклинание УСПЕШНО применено
+    /// или карта сброшена в зону сброса.
     /// </summary>
     public void OnSpellCardUsed(DraggableSpellCard card)
     {
         if (card == null) return;
+
+        // Кладём в отдельный сброс колоды магии
+        _spellDiscard.Add(card.spellType);
+
         HandleSpellCardUsed(card.gameObject);
     }
 
     /// <summary>
-    /// Вызывается картой подземелья, когда тайл УСПЕШНО поставлен.
-    /// Просто передаём сюда gameObject карты.
+    /// Вызывается картой подземелья, когда тайл УСПЕШНО поставлен
+    /// или карта сброшена в зону сброса.
     /// </summary>
     public void OnDungeonCardUsed(GameObject cardGO)
     {
         if (cardGO == null) return;
+
+        // Пытаемся вытащить информацию о тайле для сброса
+        var tileCard = cardGO.GetComponent<DraggableCardTile>();
+        if (tileCard != null && tileCard.tileDef != null)
+        {
+            _dungeonDiscard.Add(tileCard.tileDef);
+        }
+
         HandleDungeonCardUsed(cardGO);
     }
 
@@ -202,8 +229,7 @@ public class CardDeckManager : MonoBehaviour
             }
         }
 
-        // по твоему правилу: НОВЫЕ карты выдаём только когда
-        // обе карты магии уже использованы (все слоты пустые)
+        // НОВЫЕ карты выдаём только когда все слоты магии пусты
         if (allEmpty)
         {
             RefillSpellSlotsIfAllEmpty(force: false);
@@ -248,19 +274,15 @@ public class CardDeckManager : MonoBehaviour
             var entry = _spellDeck[_spellDeck.Count - 1];
             _spellDeck.RemoveAt(_spellDeck.Count - 1);
 
-            // ВАЖНО: спавним БЕЗ родителя, потом задаём масштаб и родителя
             DraggableSpellCard card = Instantiate(
-                entry.cardPrefab,
-                slot.position,
-                slot.rotation);
+            entry.cardPrefab,
+            slot.position,
+            slot.rotation );
 
-            // масштабирем как префаб (иначе может наследоваться странный scale)
-            card.transform.localScale = entry.cardPrefab.transform.localScale;
+            // ВАЖНО: сначала инстансим в мир, потом цепляем к слоту,
+            // сохраняя мировую позицию/масштаб
+            card.transform.SetParent(slot, true);
 
-            // привязываем к слоту, но сохраняем мировую позицию/масштаб
-            card.transform.SetParent(slot, worldPositionStays: true);
-
-            // настроим ссылку на DeckManager, если не задана
             if (card.deckManager == null)
                 card.deckManager = this;
 
@@ -345,21 +367,14 @@ public class CardDeckManager : MonoBehaviour
             var entry = _dungeonDeck[_dungeonDeck.Count - 1];
             _dungeonDeck.RemoveAt(_dungeonDeck.Count - 1);
 
-            // ТАК ЖЕ: спавним без родителя, потом задаём scale и parent
             GameObject cardGO = Instantiate(
-                entry.cardPrefab,
-                slot.position,
-                slot.rotation);
+            entry.cardPrefab,
+            slot.position,
+            slot.rotation );
 
-            cardGO.transform.localScale = entry.cardPrefab.transform.localScale;
-            cardGO.transform.SetParent(slot, worldPositionStays: true);
-
-            // На всякий случай пробрасываем boardView, если в префабе не проставлен
-            var dragTile = cardGO.GetComponent<DraggableCardTile>();
-            if (dragTile != null && dragTile.boardView == null)
-            {
-                dragTile.boardView = board;
-            }
+            // тоже: сперва в мир, потом привязываем к слоту,
+            // чтобы размер остался как у префаба
+            cardGO.transform.SetParent(slot, true);
 
             _activeDungeonCards[i] = cardGO;
         }

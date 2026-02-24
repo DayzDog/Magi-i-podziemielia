@@ -813,8 +813,13 @@ public class Board3DView : MonoBehaviour
     #region Магия камня
 
     /// <summary>
-    /// Магия камня по направлению от мага (для кнопок на панели и т.п.).
-    /// Внутри просто пересчитывает целевую клетку и зовёт TryCastStoneOnCell.
+    /// Магия камня по направлению от мага (для кнопок/горячих клавиш).
+    /// Внутри просто пересчитывает целевую клетку и вызывает TryCastStoneOnCell.
+    /// </summary>
+    /// <summary>
+    /// Магия камня по направлению от мага (для кнопок/горячих клавиш).
+    /// Внутри просто пересчитывает целевую клетку и вызывает TryCastStoneOnCell
+    /// или специальный метод для связки START ↔ (2,0).
     /// </summary>
     public bool TryCastStone(Side side)
     {
@@ -822,6 +827,7 @@ public class Board3DView : MonoBehaviour
 
         if (mageOnStart)
         {
+            // Со старта можно колдовать камнем только ВВЕРХ в клетку (2,0)
             if (side != Side.Up)
                 return false;
 
@@ -830,6 +836,14 @@ public class Board3DView : MonoBehaviour
         }
         else
         {
+            // ОСОБЫЙ СЛУЧАЙ: маг стоит на (2,0) и колдует ВНИЗ (к старту)
+            if (mageX == 2 && mageY == 0 && side == Side.Down)
+            {
+                // Это означает "переключить проход START ↔ (2,0)"
+                return TryCastStoneBetweenStartAndFirstCell();
+            }
+
+            // Обычный случай – соседняя клетка на поле
             Vector2Int off = side.Offset();
             tx = mageX + off.x;
             ty = mageY + off.y;
@@ -841,10 +855,26 @@ public class Board3DView : MonoBehaviour
     /// <summary>
     /// Магия камня: переключает стену между комнатой под магом и соседней клеткой (x,y).
     /// Плюс спец-случай для связи START ↔ (2,0).
+    /// Вызывается и из кнопок, и из карточек.
+    /// </summary>
+    /// <summary>
+    /// Магия камня: переключает стену между комнатой под магом и соседней клеткой (x,y).
+    /// Плюс спец-случай для связи START ↔ (2,0).
+    /// Вызывается и из кнопок, и из карточек.
     /// </summary>
     public bool TryCastStoneOnCell(int x, int y)
     {
+        // СПЕЦ-СЛУЧАЙ №1:
+        // Маг стоит на клетке (2,0), а карта камня попала в "зону" (2,0)
+        // (по лучу мы для старта тоже получаем эти координаты).
+        if (!mageOnStart && mageX == 2 && mageY == 0 && x == 2 && y == 0)
+        {
+            // Считаем, что игрок переключает проход START ↔ (2,0)
+            return TryCastStoneBetweenStartAndFirstCell();
+        }
+
         // === 0. Маг стоит на старте ===
+        // На старте камнем можно воздействовать ТОЛЬКО на клетку (2,0).
         if (mageOnStart)
         {
             if (x == 2 && y == 0)
@@ -853,6 +883,8 @@ public class Board3DView : MonoBehaviour
             Debug.Log("[Stone] На старте камнем можно воздействовать только на клетку (2,0).");
             return false;
         }
+
+        // === 1. Маг внутри подземелья ===
 
         if (!board.IsInside(x, y))
             return false;
@@ -864,6 +896,7 @@ public class Board3DView : MonoBehaviour
             return false;
         }
 
+        // Определяем направление от мага к цели
         int dx = x - mageX;
         int dy = y - mageY;
 
@@ -888,8 +921,11 @@ public class Board3DView : MonoBehaviour
             bool curEdge = curSockets.Get(side);
             bool sanctumEdge = sanctumSockets.Get(opposite);
 
+            // Если хотя бы у одной стороны был путь — закрываем.
+            // Если обе были стеной — открываем.
             bool newEdge = !(curEdge || sanctumEdge);
 
+            // Записываем в комнату мага
             switch (side)
             {
                 case Side.Up: curSockets.Up = newEdge; break;
@@ -898,6 +934,7 @@ public class Board3DView : MonoBehaviour
                 case Side.Left: curSockets.Left = newEdge; break;
             }
 
+            // И в sanctumSockets (сторона, смотрящая на мага)
             switch (opposite)
             {
                 case Side.Up: sanctumSockets.Up = newEdge; break;
@@ -912,20 +949,23 @@ public class Board3DView : MonoBehaviour
                 sanctumInstance.Connections = sanctumSockets;
 
             if (sanctumRevealed)
-                RefreshSanctumVisual();
+                RefreshSanctumVisual();  // перерисовываем только визуал Sanctum
 
+            // Перерисуем комнату под магом
             RebuildTileVisual(mageX, mageY);
 
             Debug.Log($"[Stone] Между комнатой ({mageX},{mageY}) и SANCTUM ({x},{y}) проход: {(newEdge ? "есть" : "нет")}.");
             return true;
         }
 
-        // === 1.B. Целевая клетка пустая ===
+        // === 1.B. Целевая клетка ПУСТАЯ ===
+
         TileInstance neighbor = board.Get(x, y);
         if (neighbor == null)
         {
+            // Меняем только сторону комнаты под магом.
             bool curEdge = curSockets.Get(side);
-            bool newEdge = !curEdge;
+            bool newEdge = !curEdge; // просто инвертируем путь/стену
 
             switch (side)
             {
@@ -936,19 +976,23 @@ public class Board3DView : MonoBehaviour
             }
 
             current.Connections = curSockets;
+
             RebuildTileVisual(mageX, mageY);
 
-            Debug.Log($"[Stone] Клетка ({x},{y}) пуста, сторона {side} у ({mageX},{mageY}) теперь {(newEdge ? "ПУТЬ" : "СТЕНА")}.");
+            Debug.Log($"[Stone] Клетка ({x},{y}) пуста, сторона {side} у комнаты ({mageX},{mageY}) теперь {(newEdge ? "ПУТЬ" : "СТЕНА")}.");
             return true;
         }
 
         // === 1.C. Обычная соседняя комната ===
+
         Sockets nbSockets = neighbor.Connections;
 
         bool curEdge2 = curSockets.Get(side);
         Side opposite2 = SideUtil.Opposite(side);
         bool nbEdge2 = nbSockets.Get(opposite2);
 
+        // Если хоть у кого-то есть путь — делаем стены.
+        // Если оба были стеной — открываем путь.
         bool newEdge2 = !(curEdge2 || nbEdge2);
 
         switch (side)
@@ -972,6 +1016,7 @@ public class Board3DView : MonoBehaviour
 
         Debug.Log($"[Stone] Между клетками ({mageX},{mageY}) и ({x},{y}) теперь проход: {(newEdge2 ? "есть" : "нет")}.");
 
+        // Перерисуем только эти две комнаты
         RebuildTileVisual(mageX, mageY);
         RebuildTileVisual(x, y);
 
@@ -980,9 +1025,11 @@ public class Board3DView : MonoBehaviour
 
     /// <summary>
     /// Магия камня: переключает проход между стартом и клеткой (2,0).
+    /// Работает, только если маг на старте или на (2,0).
     /// </summary>
     public bool TryCastStoneBetweenStartAndFirstCell()
     {
+        // маг должен быть либо на старте, либо на (2,0)
         bool mageHere =
             mageOnStart ||
             (!mageOnStart && mageX == 2 && mageY == 0);
@@ -1006,12 +1053,14 @@ public class Board3DView : MonoBehaviour
             return false;
         }
 
+        // читаем текущие соединения
         Sockets startSockets = startTileInstance.Connections;
         Sockets cellSockets = cell20.Connections;
 
-        bool edgeStart = startSockets.Up;
-        bool edgeCell = cellSockets.Down;
+        bool edgeStart = startSockets.Up;   // у старта вход/выход вверх
+        bool edgeCell = cellSockets.Down;  // у клетки (2,0) вход/выход вниз
 
+        // если где-то есть путь — делаем стену, если стенка с обеих сторон — открываем путь
         bool newEdge = !(edgeStart || edgeCell);
 
         startSockets.Up = newEdge;
@@ -1022,7 +1071,7 @@ public class Board3DView : MonoBehaviour
 
         Debug.Log($"[Stone] Стена между START и (2,0) теперь: {(newEdge ? "открыта (путь есть)" : "закрыта (стена)")}.");
 
-        // ОБНОВЛЯЕМ ВИЗУАЛ
+        // ОБНОВЛЯЕМ ВИЗУАЛ старта и клетки (2,0)
         RefreshStartTileVisual();
         RebuildTileVisual(2, 0);
 
