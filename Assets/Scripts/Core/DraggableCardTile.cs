@@ -2,9 +2,27 @@ using UnityEngine;
 
 public class DraggableCardTile : MonoBehaviour
 {
+    public CardDeckManager deckManager;
+    public Camera mainCamera;
+    public int ownerPlayerId = 1;
+
+    public void Init(Board3DView b, CardDeckManager dm, Camera cam, int owner)
+    {
+        boardView = b;
+        deckManager = dm;
+        mainCamera = cam;
+        ownerPlayerId = owner;
+    }
+    public void Inject(Board3DView bv, CardDeckManager dm, Camera cam)
+    {
+        boardView = bv;
+        deckManager = dm;
+        mainCam = cam != null ? cam : Camera.main;
+    }
+
     public TileDefinition tileDef;
     public Board3DView boardView;
-    public CardDeckManager deckManager;
+  
 
     [Header("Настройки перетаскивания")]
     public float dragHeight = 0.1f;
@@ -12,6 +30,7 @@ public class DraggableCardTile : MonoBehaviour
     public KeyCode rotateRightKey = KeyCode.E;
     [Range(0f, 1f)]
     public float hoverCardAlpha = 0.3f; // прозрачность карты над полем
+   
 
     private bool isDragging;
     private Vector3 startPos;
@@ -29,17 +48,19 @@ public class DraggableCardTile : MonoBehaviour
 
     private void Awake()
     {
-        mainCam = Camera.main;
+        // НЕ перетираем инъекцию от DeckManager!
         if (mainCam == null)
-        {
-            Debug.LogError("DraggableCardTile: не найдена камера с тегом MainCamera!");
-        }
+            mainCam = Camera.main;
 
-        if (boardView == null)
-            boardView = FindFirstObjectByType<Board3DView>();
-
+        // ВАЖНО: НЕ делаем FindFirstObjectByType как основной путь!
+        // Только если реально забыли проинъектить.
         if (deckManager == null)
-            deckManager = FindFirstObjectByType<CardDeckManager>();
+            deckManager = GetComponentInParent<CardDeckManager>(); // лучше так, чем FindFirst
+
+        // boardView тоже не ищем глобально — должен проинъектиться.
+        // Если хочешь fallback:
+        if (boardView == null && deckManager != null)
+            boardView = deckManager.board;
 
         ownColliders = GetComponentsInChildren<Collider>();
 
@@ -153,8 +174,17 @@ public class DraggableCardTile : MonoBehaviour
 
         if (mainCam == null)
             mainCam = Camera.main;
+
+        // ВАЖНО: для 2 игроков boardView должен быть проинъектен из DeckManager
+        if (boardView == null && deckManager != null)
+            boardView = deckManager.board;
+
         if (boardView == null)
-            boardView = FindFirstObjectByType<Board3DView>();
+        {
+            Debug.LogWarning("[TileCard] boardView == null (не проинъектен). Возврат карты.");
+            ResetCard();
+            return;
+        }
 
         // Временно отключаем свои коллайдеры, чтобы raycast не попадал в карту
         if (ownColliders != null)
@@ -163,26 +193,45 @@ public class DraggableCardTile : MonoBehaviour
                 if (col != null) col.enabled = false;
         }
 
-        // 1) Проверяем, не бросили ли карту в зону сброса
+        // 1) СНАЧАЛА проверяем сброс (RaycastAll + фильтр по своему deckManager)
         Ray ray = mainCam.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out RaycastHit hit, 200f))
+        var hits = Physics.RaycastAll(ray, 200f);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        CardDeckManager managerToNotify = deckManager;
+
+        foreach (var h in hits)
         {
-            var discard = hit.collider.GetComponentInParent<CardDiscardZone>();
-            if (discard != null &&
-                (discard.type == CardDiscardType.Dungeon ||
-                 discard.type == CardDiscardType.Both))
+            var discard = h.collider.GetComponentInParent<CardDiscardZone>();
+            if (discard == null) continue;
+
+            bool typeOk = (discard.type == CardDiscardType.Dungeon || discard.type == CardDiscardType.Both);
+
+            // КЛЮЧЕВОЕ: мусорка должна принадлежать ЭТОМУ игроку
+            bool ownerOk = (discard.deckManager == deckManager); // самый надёжный фильтр
+
+            if (typeOk && ownerOk)
             {
-                used = true; // карта ушла в сброс
+                used = true;
+                managerToNotify = discard.deckManager;
+                break;
             }
         }
 
-        // 2) Если не в сброс – пробуем поставить тайл
+        // 2) Если не в сброс – пробуем поставить тайл (ТОЛЬКО на свою доску)
         if (!used && hoveredCell != null)
         {
-            bool canPlace = boardView.CanPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
-            if (canPlace)
+            var hoveredBoard = hoveredCell.GetComponentInParent<Board3DView>();
+            if (hoveredBoard == boardView)
             {
-                used = boardView.TryPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
+                bool canPlace = boardView.CanPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
+                if (canPlace)
+                    used = boardView.TryPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
+            }
+            else
+            {
+                // навёлся на чужое поле — игнор
+                used = false;
             }
         }
 
@@ -197,15 +246,15 @@ public class DraggableCardTile : MonoBehaviour
 
         if (used)
         {
-            // карта считается использованной (поставили тайл или сбросили)
-            if (deckManager != null)
+            if (managerToNotify != null)
+                managerToNotify.OnDungeonCardUsed(gameObject);
+            else if (deckManager != null)
                 deckManager.OnDungeonCardUsed(gameObject);
             else
                 Destroy(gameObject);
         }
         else
         {
-            // никуда не попали и не смогли поставить — возвращаем в руку
             ResetCard();
         }
     }
@@ -213,33 +262,34 @@ public class DraggableCardTile : MonoBehaviour
     private void UpdateHoverAndPreview()
     {
         hoveredCell = null;
+        if (mainCam == null || boardView == null) return;
 
         Ray ray = mainCam.ScreenPointToRay(Input.mousePosition);
-        var hits = Physics.RaycastAll(ray, 100f);
+        var hits = Physics.RaycastAll(ray, 300f);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
 
         foreach (var h in hits)
         {
-            if (h.collider.gameObject == gameObject)
-                continue;
+            var cell = h.collider.GetComponentInParent<BoardCellMarker>();
+            if (cell == null) continue;
 
-            var cell = h.collider.GetComponent<BoardCellMarker>();
-            if (cell != null)
-            {
-                hoveredCell = cell;
-                break;
-            }
+            var cellBoard = cell.GetComponentInParent<Board3DView>();
+            if (cellBoard != boardView) continue; // ключ
+
+            hoveredCell = cell;
+            break;
         }
 
         if (hoveredCell != null)
         {
             bool canPlace = boardView.CanPlaceTile(tileDef, currentRotation, hoveredCell.x, hoveredCell.y);
             boardView.UpdatePreview(tileDef, currentRotation, hoveredCell.x, hoveredCell.y, canPlace);
-            SetCardVisible(false);   // над полем карта прячется
+            SetCardVisible(false);
         }
         else
         {
             boardView.HidePreview();
-            SetCardVisible(true);    // вне поля карта снова видна
+            SetCardVisible(true);
         }
     }
 

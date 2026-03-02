@@ -1,13 +1,10 @@
 using UnityEngine;
 
-public enum CardDiscardType
-{
-    Spells,     // только карты магии
-    Dungeon,    // только карты подземелья
-    Both        // принимает всё
-}
+public enum CardDiscardType { Spells, Dungeon, Both }
 
 public class CardDiscardZone : MonoBehaviour
 {
     public CardDiscardType type = CardDiscardType.Both;
+    public CardDeckManager deckManager;
+    public int ownerPlayerId = 1; // 1 = P1, 2 = P2
 }

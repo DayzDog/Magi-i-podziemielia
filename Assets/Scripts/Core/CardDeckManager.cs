@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>
 /// Менеджер двух колод:
 /// - колода заклинаний (Spell cards)
 /// - колода карт подземелья (Dungeon / Path cards)
@@ -23,7 +22,8 @@ public class CardDeckManager : MonoBehaviour
 {
     [Header("Связь с доской (необязательно, просто для удобства)")]
     public Board3DView board;
-
+    public int ownerPlayerId = 1;     // 1 или 2
+    public Camera mainCamera;         // (опционально) если хочешь задавать камеру
     // ---------- НАСТРОЙКА КОЛОД В ИНСПЕКТОРЕ ----------
 
     [Serializable]
@@ -83,13 +83,13 @@ public class CardDeckManager : MonoBehaviour
 
     private void Awake()
     {
+        // Лучше настроить board в инспекторе для каждого игрока.
         if (board == null)
             board = FindFirstObjectByType<Board3DView>();
 
         BuildSpellDeck();
         BuildDungeonDeck();
 
-        // массивы активных карт по количеству слотов
         _activeSpellCards = new GameObject[spellSlots.Length];
         _activeDungeonCards = new GameObject[dungeonSlots.Length];
     }
@@ -243,50 +243,89 @@ public class CardDeckManager : MonoBehaviour
 
         if (_spellDeck.Count == 0)
         {
-            Debug.Log("[Deck] Колода заклинаний пуста, новых карт магии не выдаём.");
+            Debug.Log($"[Deck P{ownerPlayerId}] Spell deck empty.");
             return;
         }
 
         if (!force)
         {
-            // проверяем, правда ли все слоты пустые
             for (int i = 0; i < _activeSpellCards.Length; i++)
-            {
                 if (_activeSpellCards[i] != null)
-                    return; // ещё есть карты, не раздаём новые
-            }
+                    return;
         }
 
-        // пробегаем по слотам и наполняем их пока есть карты
         for (int i = 0; i < spellSlots.Length; i++)
         {
             if (_spellDeck.Count == 0)
                 break;
 
             var slot = spellSlots[i];
-            if (slot == null)
-                continue;
+            if (slot == null) continue;
+            if (_activeSpellCards[i] != null) continue;
 
-            if (_activeSpellCards[i] != null)
-                continue; // на всякий случай
-
-            // берём последнюю карту из колоды (она уже перетасована)
             var entry = _spellDeck[_spellDeck.Count - 1];
             _spellDeck.RemoveAt(_spellDeck.Count - 1);
 
-            DraggableSpellCard card = Instantiate(
-            entry.cardPrefab,
-            slot.position,
-            slot.rotation );
+            // Инстанс БЕЗ родителя (важно для твоего масштаба)
+            DraggableSpellCard card = Instantiate(entry.cardPrefab, slot.position, slot.rotation);
 
-            // ВАЖНО: сначала инстансим в мир, потом цепляем к слоту,
-            // сохраняя мировую позицию/масштаб
-            card.transform.SetParent(slot, true);
+            // КАК ТЫ ХОЧЕШЬ: сохраняем world scale/size
+            card.transform.SetParent(slot, true); // НЕ УДАЛЯТЬ
 
-            if (card.deckManager == null)
-                card.deckManager = this;
+            // ЖЁСТКО инжектим “свою” доску и “свою” колоду
+            card.board = board;                          // BoardRoot_PlayerX
+            card.deckManager = this;                     // DeckManager_PlayerX
+            card.mainCamera = mainCamera != null ? mainCamera : Camera.main;
 
             _activeSpellCards[i] = card.gameObject;
+        }
+    }
+
+    private void RefillDungeonSlotsIfAllEmpty(bool force)
+    {
+        if (dungeonSlots == null || dungeonSlots.Length == 0)
+            return;
+
+        if (_dungeonDeck.Count == 0)
+        {
+            Debug.Log($"[Deck P{ownerPlayerId}] Dungeon deck empty.");
+            return;
+        }
+
+        if (!force)
+        {
+            for (int i = 0; i < _activeDungeonCards.Length; i++)
+                if (_activeDungeonCards[i] != null)
+                    return;
+        }
+
+        for (int i = 0; i < dungeonSlots.Length; i++)
+        {
+            if (_dungeonDeck.Count == 0)
+                break;
+
+            var slot = dungeonSlots[i];
+            if (slot == null) continue;
+            if (_activeDungeonCards[i] != null) continue;
+
+            var entry = _dungeonDeck[_dungeonDeck.Count - 1];
+            _dungeonDeck.RemoveAt(_dungeonDeck.Count - 1);
+
+            GameObject cardGO = Instantiate(entry.cardPrefab, slot.position, slot.rotation);
+
+            // КАК ТЫ ХОЧЕШЬ: сохраняем world scale/size
+            cardGO.transform.SetParent(slot, true); // НЕ УДАЛЯТЬ
+
+            // Инжектим “свою” доску в карту тайла
+            var tileCard = cardGO.GetComponent<DraggableCardTile>();
+            if (tileCard != null)
+            {
+                tileCard.boardView = board;        // BoardRoot_PlayerX
+                tileCard.deckManager = this;       // DeckManager_PlayerX (нужно для сброса/выдачи)
+                tileCard.Inject(board, this, mainCamera);
+            }
+
+            _activeDungeonCards[i] = cardGO;
         }
     }
 
@@ -329,54 +368,6 @@ public class CardDeckManager : MonoBehaviour
         if (allEmpty)
         {
             RefillDungeonSlotsIfAllEmpty(force: false);
-        }
-    }
-
-    private void RefillDungeonSlotsIfAllEmpty(bool force)
-    {
-        if (dungeonSlots == null || dungeonSlots.Length == 0)
-            return;
-
-        if (_dungeonDeck.Count == 0)
-        {
-            Debug.Log("[Deck] Колода подземелья пуста, новых карт путей не выдаём.");
-            return;
-        }
-
-        if (!force)
-        {
-            for (int i = 0; i < _activeDungeonCards.Length; i++)
-            {
-                if (_activeDungeonCards[i] != null)
-                    return;
-            }
-        }
-
-        for (int i = 0; i < dungeonSlots.Length; i++)
-        {
-            if (_dungeonDeck.Count == 0)
-                break;
-
-            var slot = dungeonSlots[i];
-            if (slot == null)
-                continue;
-
-            if (_activeDungeonCards[i] != null)
-                continue;
-
-            var entry = _dungeonDeck[_dungeonDeck.Count - 1];
-            _dungeonDeck.RemoveAt(_dungeonDeck.Count - 1);
-
-            GameObject cardGO = Instantiate(
-            entry.cardPrefab,
-            slot.position,
-            slot.rotation );
-
-            // тоже: сперва в мир, потом привязываем к слоту,
-            // чтобы размер остался как у префаба
-            cardGO.transform.SetParent(slot, true);
-
-            _activeDungeonCards[i] = cardGO;
         }
     }
 }
