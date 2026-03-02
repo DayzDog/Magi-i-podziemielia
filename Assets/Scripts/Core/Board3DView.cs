@@ -69,6 +69,8 @@ public class Board3DView : MonoBehaviour
     private Sockets sanctumSockets;
     private TileInstance sanctumInstance;
     private GameObject sanctumWorldGO;
+    private SanctumSyncManager sanctumSync;
+    private bool sanctumConfigured;
 
     // --- превью тайла ---
     private GameObject previewGO;
@@ -105,9 +107,6 @@ public class Board3DView : MonoBehaviour
 
             anchors[m.x, m.y] = m.transform;
         }
-
-        InitSanctum();
-
         // создаём "виртуальный" инстанс стартового тайла (для логики)
         if (startTileDefinition != null)
         {
@@ -117,46 +116,51 @@ public class Board3DView : MonoBehaviour
 
     private void Start()
     {
+        if (!sanctumConfigured)
+        {
+            // если играем без SanctumSyncManager — как раньше (одна доска)
+            ConfigureSharedSanctum(UnityEngine.Random.Range(0, BoardModel.Width), null);
+        }
         RefreshStartTileVisual();
         SpawnMage();
     }
 
-    private void InitSanctum()
-    {
-        sanctumX = UnityEngine.Random.Range(0, BoardModel.Width);
-        sanctumY = 4; // верхний ряд
-
-        sanctumRevealed = false;
-
-        // y=4 — дальний край, значит Up всегда стена (false)
-        sanctumSockets.Up = false;
-        sanctumSockets.Down = true; // во всех вариантах есть путь вниз
-
-        if (sanctumX == 0)
-        {
-            // Левый угол: поворот вниз+вправо
-            sanctumSockets.Left = false;
-            sanctumSockets.Right = true;
-        }
-        else if (sanctumX == BoardModel.Width - 1)
-        {
-            // Правый угол: поворот вниз+влево
-            sanctumSockets.Left = true;
-            sanctumSockets.Right = false;
-        }
-        else
-        {
-            // Средние 3 клетки: T-образный тайл (вниз, влево и вправо)
-            sanctumSockets.Left = true;
-            sanctumSockets.Right = true;
-        }
-
-        sanctumInstance = null;
-        sanctumWorldGO = null;
-
-        Debug.Log($"[Sanctum] Hidden at ({sanctumX},{sanctumY}), sockets: " +
-                  $"U:{sanctumSockets.Up} R:{sanctumSockets.Right} D:{sanctumSockets.Down} L:{sanctumSockets.Left}");
-    }
+    //private void InitSanctum()
+    // {
+    // sanctumX = UnityEngine.Random.Range(0, BoardModel.Width);
+    //  sanctumY = 4; // верхний ряд
+    //
+    // sanctumRevealed = false;
+    //
+    // y=4 — дальний край, значит Up всегда стена (false)
+    // sanctumSockets.Up = false;
+    // sanctumSockets.Down = true; // во всех вариантах есть путь вниз
+    //
+    //     if (sanctumX == 0)
+    //    {
+    // Левый угол: поворот вниз+вправо
+    //  sanctumSockets.Left = false;
+    // sanctumSockets.Right = true;
+    //}
+    //   else if (sanctumX == BoardModel.Width - 1)
+    //{
+    // Правый угол: поворот вниз+влево
+    // sanctumSockets.Left = true;
+    //  sanctumSockets.Right = false;
+    //}
+    // else
+    //  {
+    // Средние 3 клетки: T-образный тайл (вниз, влево и вправо)
+    //  sanctumSockets.Left = true;
+    // sanctumSockets.Right = true;
+    //}
+    //
+    // sanctumInstance = null;
+    // sanctumWorldGO = null;
+    //
+    //Debug.Log($"[Sanctum] Hidden at ({sanctumX},{sanctumY}), sockets: " +
+    //           $"U:{sanctumSockets.Up} R:{sanctumSockets.Right} D:{sanctumSockets.Down} L:{sanctumSockets.Left}");
+    //}
 
     #endregion
 
@@ -233,6 +237,11 @@ public class Board3DView : MonoBehaviour
 
     private void RevealSanctum()
     {
+        RevealSanctumInternal(notifySync: true);
+    }
+
+    private void RevealSanctumInternal(bool notifySync)
+    {
         if (sanctumRevealed)
             return;
 
@@ -250,6 +259,10 @@ public class Board3DView : MonoBehaviour
         board.Set(sanctumX, sanctumY, sanctumInstance);
 
         RefreshSanctumVisual();
+
+        // ВАЖНО: если нужно — уведомляем синк-менеджер, чтобы раскрыть Sanctum на второй доске
+        if (notifySync && sanctumSync != null)
+            sanctumSync.NotifyBoardRevealed(this);
     }
 
     // ВАЖНО: после того как маг забрал Гримуар, клетка больше не считается Sanctum.
@@ -331,6 +344,63 @@ public class Board3DView : MonoBehaviour
 
         // Пересобираем визуал как обычный тайл
         RebuildTileVisual(sanctumX, sanctumY);
+    }
+
+    public void ConfigureSharedSanctum(int sharedX, SanctumSyncManager sync)
+    {
+        sanctumSync = sync;
+        sanctumConfigured = true;
+
+        sanctumX = Mathf.Clamp(sharedX, 0, BoardModel.Width - 1);
+        sanctumY = 4;
+
+        sanctumRevealed = false;
+
+        // ВАЖНО: sanctumSockets считаем локально для ЭТОЙ доски
+        sanctumSockets = BuildInitialSanctumSockets(sanctumX);
+
+        sanctumInstance = null;
+        sanctumWorldGO = null;
+
+        Debug.Log($"[Sanctum] Configured shared at ({sanctumX},{sanctumY}) sockets: " +
+                  $"U:{sanctumSockets.Up} R:{sanctumSockets.Right} D:{sanctumSockets.Down} L:{sanctumSockets.Left}");
+    }
+
+    public void ForceRevealSanctumFromSync()
+    {
+        RevealSanctumInternal(notifySync: false);
+    }
+
+    private Sockets BuildInitialSanctumSockets(int x)
+    {
+        Sockets s = new Sockets();
+
+        // Верхняя граница всегда стена
+        s.Up = false;
+
+        // В данж Sanctum "смотрит" вниз
+        s.Down = true;
+
+        if (x == 0)
+        {
+            // левый угол: вниз + вправо
+            s.Left = false;
+            s.Right = true;
+        }
+        else if (x == BoardModel.Width - 1)
+        {
+            // правый угол: вниз + влево
+            s.Left = true;
+            s.Right = false;
+        }
+        else
+        {
+            // середина: T (вниз + влево + вправо)
+            s.Left = true;
+            s.Right = true;
+        }
+
+        return s;
     }
 
     #endregion
