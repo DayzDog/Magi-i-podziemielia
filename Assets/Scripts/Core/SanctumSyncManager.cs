@@ -1,4 +1,5 @@
 using UnityEngine;
+[DefaultExecutionOrder(-100)]
 
 public class SanctumSyncManager : MonoBehaviour
 {
@@ -16,21 +17,20 @@ public class SanctumSyncManager : MonoBehaviour
     {
         if (boardP1 == null || boardP2 == null)
         {
-            Debug.LogError("[SanctumSync] Assign boardP1 and boardP2 in Inspector.");
+            Debug.LogError("[SanctumSync] boardP1/boardP2 не назначены.");
             return;
         }
 
-        int x = sharedSanctumX;
-        if (x < 0) x = Random.Range(0, BoardModel.Width);
-        x = Mathf.Clamp(x, 0, BoardModel.Width - 1);
+        int x;
+        if (sharedSanctumX < 0)
+            x = UnityEngine.Random.Range(0, BoardModel.Width);
+        else
+            x = Mathf.Clamp(sharedSanctumX, 0, BoardModel.Width - 1);
 
-        sharedSanctumX = x;
+        Debug.Log($"[SanctumSync] Shared Sanctum X={x}");
 
-        // Конфигурируем обе доски ОДНИМ X
         boardP1.ConfigureSharedSanctum(x, this);
         boardP2.ConfigureSharedSanctum(x, this);
-
-        Debug.Log($"[SanctumSync] Shared Sanctum X = {x}, Y = 4 for both boards.");
     }
 
     public void NotifyBoardRevealed(Board3DView source)

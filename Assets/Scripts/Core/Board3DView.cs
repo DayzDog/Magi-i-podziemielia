@@ -118,8 +118,9 @@ public class Board3DView : MonoBehaviour
     {
         if (!sanctumConfigured)
         {
-            // если играем без SanctumSyncManager — как раньше (одна доска)
-            ConfigureSharedSanctum(UnityEngine.Random.Range(0, BoardModel.Width), null);
+            Debug.LogError("[Board3DView] Sanctum НЕ настроен. В дуэли он обязан приходить из SanctumSyncManager.");
+            enabled = false; // чтобы не было частично-рабочего состояния
+            return;
         }
         RefreshStartTileVisual();
         SpawnMage();
@@ -402,7 +403,35 @@ public class Board3DView : MonoBehaviour
 
         return s;
     }
+   
+    private void OnSanctumEdgeChangedFromNeighbor(int neighborX, int neighborY, Side sideFromNeighborToSanctum, bool edgeToSanctum)
+    {
+        // 1) вычисляем, какая сторона Sanctum смотрит на соседа
+        Side sanctumSide = SideUtil.Opposite(sideFromNeighborToSanctum);
 
+        // 2) обновляем сокеты Sanctum
+        SetSanctumSocket(sanctumSide, edgeToSanctum);
+
+        // 3) если Sanctum уже раскрыт — обязательно обновляем модель и визуал
+        if (sanctumRevealed)
+        {
+            if (sanctumInstance != null)
+                sanctumInstance.Connections = sanctumSockets;
+
+            // на всякий случай гарантируем, что в BoardModel лежит именно sanctumInstance
+            if (board.Get(sanctumX, sanctumY) != sanctumInstance)
+                board.Set(sanctumX, sanctumY, sanctumInstance);
+
+            RefreshSanctumVisual();
+            return;
+        }
+
+        // 4) если Sanctum ещё скрыт и мы открыли к нему путь — раскрываем
+        if (edgeToSanctum)
+        {
+            RevealSanctum(); // внутри уже создаст sanctumInstance, запишет в board и нарисует
+        }
+    }
     #endregion
 
     #region Mage + Movement
@@ -986,16 +1015,14 @@ public class Board3DView : MonoBehaviour
         // === 1.A. Если целевая клетка — SANCTUM ===
         if (IsSanctumCell(x, y))
         {
-            Side opposite = SideUtil.Opposite(side);
-
             bool curEdge = curSockets.Get(side);
+            Side opposite = SideUtil.Opposite(side);
             bool sanctumEdge = sanctumSockets.Get(opposite);
 
-            // Если хотя бы у одной стороны был путь — закрываем.
-            // Если обе были стеной — открываем.
-            bool newEdge = !(curEdge || sanctumEdge);
+            bool openNow = curEdge && sanctumEdge;
+            bool newEdge = !openNow;
 
-            // Записываем в комнату мага
+            // меняем сторону у тайла мага
             switch (side)
             {
                 case Side.Up: curSockets.Up = newEdge; break;
@@ -1004,24 +1031,11 @@ public class Board3DView : MonoBehaviour
                 case Side.Left: curSockets.Left = newEdge; break;
             }
 
-            // И в sanctumSockets (сторона, смотрящая на мага)
-            switch (opposite)
-            {
-                case Side.Up: sanctumSockets.Up = newEdge; break;
-                case Side.Right: sanctumSockets.Right = newEdge; break;
-                case Side.Down: sanctumSockets.Down = newEdge; break;
-                case Side.Left: sanctumSockets.Left = newEdge; break;
-            }
-
             current.Connections = curSockets;
 
-            if (sanctumInstance != null)
-                sanctumInstance.Connections = sanctumSockets;
+            // Sanctum обновляем через единую точку
+            OnSanctumEdgeChangedFromNeighbor(mageX, mageY, side, newEdge);
 
-            if (sanctumRevealed)
-                RefreshSanctumVisual();  // перерисовываем только визуал Sanctum
-
-            // Перерисуем комнату под магом
             RebuildTileVisual(mageX, mageY);
 
             Debug.Log($"[Stone] Между комнатой ({mageX},{mageY}) и SANCTUM ({x},{y}) проход: {(newEdge ? "есть" : "нет")}.");
@@ -1313,7 +1327,7 @@ public class Board3DView : MonoBehaviour
         Sockets after = RotateSockets(tile.Connections, totalStepsTile);
 
         // НЕ режем выходы за край поля — путь может смотреть в край доски
-        bool sanctumSideTouched = false;
+
 
         // Подгоняем соседей
         foreach (Side side in System.Enum.GetValues(typeof(Side)))
@@ -1325,55 +1339,36 @@ public class Board3DView : MonoBehaviour
             bool edge = after.Get(side);
             Side opp = SideUtil.Opposite(side);
 
-            // --- ОСОБЫЙ СЛУЧАЙ: сосед — СТАРТОВЫЙ ТАЙЛ ПОД (2,0) ---
-            // Старт логически находится под клеткой (2,0) на стороне Down.
+            // --- ОСОБЫЙ СЛУЧАЙ: старт под (2,0) ---
             if (x == 2 && y == 0 && side == Side.Down)
             {
                 if (startTileInstance != null)
                 {
                     var startSockets = startTileInstance.Connections;
-                    // У старта единственная сторона, которая нас интересует — Up.
                     startSockets.Up = edge;
                     startTileInstance.Connections = startSockets;
 
-                    // Обновляем визуал старта (обычный/заблокированный)
                     RefreshStartTileVisual();
                 }
-
-                // Для этой стороны дальше никого не трогаем
                 continue;
             }
 
-            // --- обычные границы поля ---
+            // --- ОСОБЫЙ СЛУЧАЙ: сосед = Sanctum ---
+            if (IsSanctumCell(nx, ny))
+            {
+                OnSanctumEdgeChangedFromNeighbor(x, y, side, edge);
+                continue;
+            }
+
+            // дальше — только реальная доска
             if (!board.IsInside(nx, ny))
                 continue;
 
-            // --- СЛУЧАЙ: сосед — SANCTUM ---
-            if (IsSanctumCell(nx, ny))
-            {
-                // Обновляем sanctumSockets так, чтобы дверь Sanctum
-                // совпадала с новой стороной текущего тайла
-                switch (opp)
-                {
-                    case Side.Up: sanctumSockets.Up = edge; break;
-                    case Side.Right: sanctumSockets.Right = edge; break;
-                    case Side.Down: sanctumSockets.Down = edge; break;
-                    case Side.Left: sanctumSockets.Left = edge; break;
-                }
-
-                if (sanctumInstance != null)
-                    sanctumInstance.Connections = sanctumSockets;
-
-                sanctumSideTouched = true;
-                continue; // не перерисовываем Sanctum как обычный тайл
-            }
-
-            // --- СЛУЧАЙ: обычный соседний тайл ---
             TileInstance nb = board.Get(nx, ny);
             if (nb == null)
                 continue;
 
-            Sockets nbSockets = nb.Connections;
+            var nbSockets = nb.Connections;
             switch (opp)
             {
                 case Side.Up: nbSockets.Up = edge; break;
@@ -1381,15 +1376,10 @@ public class Board3DView : MonoBehaviour
                 case Side.Down: nbSockets.Down = edge; break;
                 case Side.Left: nbSockets.Left = edge; break;
             }
-
             nb.Connections = nbSockets;
+
             RebuildTileVisual(nx, ny);
         }
-
-        // Если изменили хотя бы одну сторону Sanctum — перерисуем его
-        if (sanctumSideTouched)
-            RefreshSanctumVisual();
-
         // Сохраняем новые сокеты самого тайла и перерисовываем его
         tile.Connections = after;
         RebuildTileVisual(x, y);
