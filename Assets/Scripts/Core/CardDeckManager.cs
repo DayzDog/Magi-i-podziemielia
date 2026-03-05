@@ -20,6 +20,7 @@ using UnityEngine;
 /// </summary>
 public class CardDeckManager : MonoBehaviour
 {
+ 
     [Header("Связь с доской (необязательно, просто для удобства)")]
     public Board3DView board;
     public int ownerPlayerId = 1;     // 1 или 2
@@ -81,6 +82,30 @@ public class CardDeckManager : MonoBehaviour
     [SerializeField]
     private List<TileDefinition> _dungeonDiscard = new List<TileDefinition>();
 
+    [Header("Turn control")]
+    [SerializeField] private bool spellsEnabled = true;
+    [SerializeField] private bool dungeonEnabled = true;
+
+    private Board3DView targetBoardOverride = null;
+
+    public bool IsSpellsEnabled() => spellsEnabled;
+    public bool IsDungeonEnabled() => dungeonEnabled;
+
+    public void SetInputEnabled(bool spells, bool dungeon)
+    {
+        spellsEnabled = spells;
+        dungeonEnabled = dungeon;
+    }
+
+    public void SetTargetBoard(Board3DView target)
+    {
+        targetBoardOverride = target;
+    }
+
+    public Board3DView GetTargetBoard()
+    {
+        return targetBoardOverride != null ? targetBoardOverride : board;
+    }
     private void Awake()
     {
         // Лучше настроить board в инспекторе для каждого игрока.
@@ -368,6 +393,56 @@ public class CardDeckManager : MonoBehaviour
         if (allEmpty)
         {
             RefillDungeonSlotsIfAllEmpty(force: false);
+        }
+    }
+    public void RefillToFullNow()
+    {
+        RefillSpellSlotsFillEmpty();
+        RefillDungeonSlotsFillEmpty();
+    }
+    private void RefillSpellSlotsFillEmpty()
+    {
+        for (int i = 0; i < spellSlots.Length; i++)
+        {
+            if (_activeSpellCards[i] != null) continue;
+            if (_spellDeck.Count == 0) break;
+
+            var entry = _spellDeck[_spellDeck.Count - 1];
+            _spellDeck.RemoveAt(_spellDeck.Count - 1);
+
+            DraggableSpellCard card = Instantiate(entry.cardPrefab, spellSlots[i].position, spellSlots[i].rotation);
+            card.transform.SetParent(spellSlots[i], true); // ВАЖНО: не ломаем размер
+
+            // инжектим владельца
+            card.deckManager = this;
+            card.mainCamera = mainCamera != null ? mainCamera : Camera.main;
+            card.board = GetTargetBoard();
+
+            _activeSpellCards[i] = card.gameObject;
+        }
+    }
+
+    private void RefillDungeonSlotsFillEmpty()
+    {
+        for (int i = 0; i < dungeonSlots.Length; i++)
+        {
+            if (_activeDungeonCards[i] != null) continue;
+            if (_dungeonDeck.Count == 0) break;
+
+            var entry = _dungeonDeck[_dungeonDeck.Count - 1];
+            _dungeonDeck.RemoveAt(_dungeonDeck.Count - 1);
+
+            GameObject cardGO = Instantiate(entry.cardPrefab, dungeonSlots[i].position, dungeonSlots[i].rotation);
+            cardGO.transform.SetParent(dungeonSlots[i], true); // ВАЖНО: не ломаем размер
+
+            var tileCard = cardGO.GetComponent<DraggableCardTile>();
+            if (tileCard != null)
+            {
+                tileCard.deckManager = this;
+                tileCard.boardView = GetTargetBoard();
+            }
+
+            _activeDungeonCards[i] = cardGO;
         }
     }
 }

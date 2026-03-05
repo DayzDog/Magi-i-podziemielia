@@ -148,6 +148,12 @@ public class DraggableCardTile : MonoBehaviour
 
     private void StartDrag()
     {
+        if (deckManager != null && !deckManager.IsDungeonEnabled())
+            return;
+
+        if (deckManager != null)
+            boardView = deckManager.GetTargetBoard();
+
         if (tileDef == null || boardView == null)
         {
             Debug.LogError("DraggableCardTile: не назначен tileDef или boardView");

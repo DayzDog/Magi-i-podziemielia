@@ -53,6 +53,9 @@ public class DraggableSpellCard : MonoBehaviour
 
     private void OnMouseDown()
     {
+        if (deckManager != null && !deckManager.IsSpellsEnabled())
+            return;
+
         if (mainCamera == null) return;
 
         isDragging = true;
@@ -67,6 +70,9 @@ public class DraggableSpellCard : MonoBehaviour
 
         Vector2 screenPos = GetMouseScreenPos();
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
+
+        if (deckManager != null)
+            board = deckManager.GetTargetBoard();
 
         if (dragPlane.Raycast(ray, out float enter))
         {

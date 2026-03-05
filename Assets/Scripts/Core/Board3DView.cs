@@ -90,6 +90,11 @@ public class Board3DView : MonoBehaviour
         public GameObject prefab;
     }
 
+    // Публичные геттеры для TurnManager
+    public bool HasGrimoire => mageHasGrimoire;      // или MageHasGrimoire
+    public bool IsMageOnStartTile => mageOnStart;    // маг сейчас на Cell_start
+    public bool IsWinnerNow() => HasGrimoire && IsMageOnStartTile;
+
     #region Init / Awake / Start
 
     private void Awake()
