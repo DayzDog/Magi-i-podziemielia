@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 public class TurnManager : MonoBehaviour
@@ -6,52 +7,63 @@ public class TurnManager : MonoBehaviour
 
     public enum Phase
     {
-        SetupRoll,          // бросок d4, выдача жетона
-        InitialDeal,        // раздать по 2 магии и 2 тайла каждому
-        P1_EnemyPlace,      // (первый цикл) соперник ставит 1й тайл в подземелье игрока
-        P1_OwnerPlace,      // владелец ставит 2й тайл себе
-        P1_OwnerSpell,      // владелец магию себе
-        P1_Move,            // владелец двигает мага
-        P2_EnemyPlace,      // (первый цикл) соперник ставит 1й тайл во 2е подземелье
-        P2_OwnerPlace,
-        P2_OwnerSpell,
-        P2_Move,
+        SetupRoll,
+        InitialDeal,
 
-        // последующие циклы:
-        P1_EnemySpellOpt,   // соперник магию в подземелье игрока 1 или пас
-        P1_OwnerPlace1,
-        P1_OwnerSpell2,
-        P1_Move2,
+        // Первый цикл (без enemy spell)
+        Initial_EnemyPlace,     // соперник ставит 1-й тайл в подземелье текущего владельца
+        Initial_OwnerTurn3,     // владелец делает 3 действия (тайл+магия+ход)
 
-        P2_EnemySpellOpt,
-        P2_OwnerPlace1,
-        P2_OwnerSpell2,
-        P2_Move2,
+        // Обычный цикл
+        Normal_EnemySpellOpt,   // соперник кидает магию в подземелье владельца ИЛИ пропускает
+        Normal_OwnerTurn3,      // владелец делает 3 действия (тайл+магия+ход)
 
-        EndOfRoundSwap,     // передать жетон, сменить порядок
-        RefillHands,        // добор недостающих до 2+2
-        CheckWinAfterRefill // проверка победы/ничьей (после добора!)
+        EndOfRoundSwap,
+        RefillHands,
+        CheckWinAfterRefill,
+
+        GameOver
     }
 
-    [System.Serializable]
+    [Serializable]
     public class PlayerCtx
     {
-        public int playerId;                 // 1 / 2 (физический игрок)
-        public Board3DView board;            // его поле
-        public CardDeckManager deck;         // его колоды
-        public bool hasFirstToken;           // “жетон первого хода”
+        public int playerId;          // 1 / 2
+        public Board3DView board;     // поле игрока
+        public CardDeckManager deck;  // колоды игрока
     }
 
-    [Header("Players (физические)")]
+    [Header("Players")]
     public PlayerCtx p1;
     public PlayerCtx p2;
 
     [Header("Debug")]
     public Phase phase = Phase.SetupRoll;
+    public int firstPlayerId = 1;     // у кого жетон "первого" в текущем раунде
+    public int currentOwnerId = 1;    // чьё подземелье сейчас является "owner"
+    public bool initialRound = true;  // первый цикл партии
 
-    // кто “первый игрок” в текущем цикле (это НЕ поле, а порядок)
-    private int firstPlayerId; // 1 или 2
-    private bool initialRound = true;
+    // “3 галочки”
+    private struct OwnerActions
+    {
+        public bool placed;
+        public bool spelled;
+        public bool moved;
+    }
+    private OwnerActions _ownerActions;
+
+    // прогресс раунда
+    private int _ownersDoneThisRound = 0;
+
+    // ----- CRYSTALS -----
+    // Используем ТВОИ скрипты:
+    // - TurnCrystal.cs (каждый кристалл)
+    // - TurnCrystalsSet.cs (набор из 4 кристаллов)
+    [Header("Crystals (optional)")]
+    public TurnCrystalsSet crystalsSet;   // желательно
+    public TurnCrystal[] crystalsFallback; // если не хочешь использовать set
+
+    private int _activeActorId = -1;
 
     private void Awake()
     {
@@ -63,244 +75,396 @@ public class TurnManager : MonoBehaviour
         StartGame();
     }
 
+    private PlayerCtx GetP(int id) => (id == 1) ? p1 : p2;
+    private int Other(int id) => (id == 1) ? 2 : 1;
+
+    // Кто сейчас “активный игрок” (кто может кликать карты/кристаллы)
+    private int GetActorIdForCurrentPhase()
+    {
+        switch (phase)
+        {
+            case Phase.Initial_EnemyPlace:
+            case Phase.Normal_EnemySpellOpt:
+                return Other(currentOwnerId);
+
+            case Phase.Initial_OwnerTurn3:
+            case Phase.Normal_OwnerTurn3:
+                return currentOwnerId;
+
+            default:
+                return 0;
+        }
+    }
+
+    // -------------------- START GAME --------------------
+
     public void StartGame()
     {
         phase = Phase.SetupRoll;
 
-        // d4 бросок (чисто кто первый)
-        int roll1 = UnityEngine.Random.Range(1, 5);
-        int roll2 = UnityEngine.Random.Range(1, 5);
-
-        // если равенство — перебрасываем (чтобы не спорить)
-        while (roll1 == roll2)
+        int r1 = UnityEngine.Random.Range(1, 5);
+        int r2 = UnityEngine.Random.Range(1, 5);
+        while (r1 == r2)
         {
-            roll1 = UnityEngine.Random.Range(1, 5);
-            roll2 = UnityEngine.Random.Range(1, 5);
+            r1 = UnityEngine.Random.Range(1, 5);
+            r2 = UnityEngine.Random.Range(1, 5);
         }
 
-        firstPlayerId = roll1 > roll2 ? 1 : 2;
+        firstPlayerId = (r1 > r2) ? 1 : 2;
+        initialRound = true;
 
-        p1.hasFirstToken = (firstPlayerId == 1);
-        p2.hasFirstToken = (firstPlayerId == 2);
+        Debug.Log($"[TURN] SetupRoll: P1={r1}, P2={r2}. FirstToken=P{firstPlayerId}");
 
-        // 1) initial deal
         phase = Phase.InitialDeal;
         DealInitialHands();
 
-        // 2) запускаем первый цикл
-        GoToFirstTurnStart();
+        _ownersDoneThisRound = 0;
+
+        // Первый цикл начинается: owner = firstPlayerId, actor = другой игрок
+        BeginInitialEnemyPlace(ownerId: firstPlayerId);
     }
 
     private void DealInitialHands()
     {
-        // добираем ДО 2 в каждой колоде (магия и тайлы)
+        // стартовая раздача
         p1.deck.RefillToFullNow();
         p2.deck.RefillToFullNow();
     }
 
-    private void GoToFirstTurnStart()
+    // -------------------- PHASE STARTERS --------------------
+
+    private void BeginInitialEnemyPlace(int ownerId)
     {
-        initialRound = true;
-
-        // В первом цикле: игрок, который НЕ первый, ставит 1й тайл в подземелье первого.
-        if (firstPlayerId == 1)
-            phase = Phase.P1_EnemyPlace;
-        else
-            phase = Phase.P2_EnemyPlace;
-
+        currentOwnerId = ownerId;
+        phase = Phase.Initial_EnemyPlace;
         ApplyPhaseGates();
     }
 
-    /// <summary>
-    /// Вызывай из UI кнопкой "Next" / "Pass" / или автоматически после успешного действия.
-    /// </summary>
-    public void NextPhase()
+    private void BeginInitialOwnerTurn3()
     {
-        // Переходы по твоему регламенту
-        switch (phase)
-        {
-            // --- Первый цикл ---
-            case Phase.P1_EnemyPlace: phase = Phase.P1_OwnerPlace; break;
-            case Phase.P1_OwnerPlace: phase = Phase.P1_OwnerSpell; break;
-            case Phase.P1_OwnerSpell: phase = Phase.P1_Move; break;
-            case Phase.P1_Move: phase = Phase.P2_EnemyPlace; break;
-
-            case Phase.P2_EnemyPlace: phase = Phase.P2_OwnerPlace; break;
-            case Phase.P2_OwnerPlace: phase = Phase.P2_OwnerSpell; break;
-            case Phase.P2_OwnerSpell: phase = Phase.P2_Move; break;
-            case Phase.P2_Move:
-                // передаём жетон и уходим в обычный цикл
-                phase = Phase.EndOfRoundSwap;
-                break;
-
-            // --- Обычный цикл ---
-            case Phase.P1_EnemySpellOpt: phase = Phase.P1_OwnerPlace1; break;
-            case Phase.P1_OwnerPlace1: phase = Phase.P1_OwnerSpell2; break;
-            case Phase.P1_OwnerSpell2: phase = Phase.P1_Move2; break;
-            case Phase.P1_Move2: phase = Phase.P2_EnemySpellOpt; break;
-
-            case Phase.P2_EnemySpellOpt: phase = Phase.P2_OwnerPlace1; break;
-            case Phase.P2_OwnerPlace1: phase = Phase.P2_OwnerSpell2; break;
-            case Phase.P2_OwnerSpell2: phase = Phase.P2_Move2; break;
-            case Phase.P2_Move2:
-                phase = Phase.EndOfRoundSwap;
-                break;
-
-            case Phase.EndOfRoundSwap:
-                SwapFirstToken();
-                phase = Phase.RefillHands;
-                RefillHands();
-                phase = Phase.CheckWinAfterRefill;
-                CheckWinAfterRefill();
-                // новый цикл начинается с того, кто теперь “первый”
-                phase = (firstPlayerId == 1) ? Phase.P1_EnemySpellOpt : Phase.P2_EnemySpellOpt;
-                initialRound = false;
-                break;
-        }
-
+        ResetOwnerActions();
+        phase = Phase.Initial_OwnerTurn3;
         ApplyPhaseGates();
     }
 
-    private void SwapFirstToken()
+    private void BeginNormalEnemySpellOpt(int ownerId)
     {
-        // жетон переходит
-        firstPlayerId = (firstPlayerId == 1) ? 2 : 1;
-        p1.hasFirstToken = (firstPlayerId == 1);
-        p2.hasFirstToken = (firstPlayerId == 2);
+        currentOwnerId = ownerId;
+        phase = Phase.Normal_EnemySpellOpt;
+        ApplyPhaseGates();
     }
 
-    private void RefillHands()
+    private void BeginNormalOwnerTurn3()
     {
-        // “тянут недостающие карты”
+        ResetOwnerActions();
+        phase = Phase.Normal_OwnerTurn3;
+        ApplyPhaseGates();
+    }
+
+    private void EndRound()
+    {
+        phase = Phase.EndOfRoundSwap;
+
+        // жетон "первого" переходит
+        firstPlayerId = Other(firstPlayerId);
+        Debug.Log($"[TURN] EndRoundSwap. New FirstToken=P{firstPlayerId}");
+
+        phase = Phase.RefillHands;
         p1.deck.RefillToFullNow();
         p2.deck.RefillToFullNow();
+
+        phase = Phase.CheckWinAfterRefill;
+        CheckWinAfterRefill();
+        if (phase == Phase.GameOver) { ApplyPhaseGates(); return; }
+
+        _ownersDoneThisRound = 0;
+        initialRound = false;
+
+        // новый раунд всегда начинается с owner = firstPlayerId
+        BeginNormalEnemySpellOpt(ownerId: firstPlayerId);
     }
 
     private void CheckWinAfterRefill()
     {
-        bool p1Win = p1.board != null && p1.board.IsWinnerNow(); // сделаем метод ниже
+        bool p1Win = p1.board != null && p1.board.IsWinnerNow();
         bool p2Win = p2.board != null && p2.board.IsWinnerNow();
 
         if (p1Win && p2Win)
         {
             Debug.Log("[WIN] DRAW (оба успели до раздачи).");
-            // TODO: UI “ничья”
+            phase = Phase.GameOver;
         }
         else if (p1Win)
         {
             Debug.Log("[WIN] Player1 wins.");
-            // TODO: UI “П1 победа”
+            phase = Phase.GameOver;
         }
         else if (p2Win)
         {
             Debug.Log("[WIN] Player2 wins.");
-            // TODO: UI “П2 победа”
+            phase = Phase.GameOver;
         }
     }
 
-    /// <summary>
-    /// Вот тут мы включаем/выключаем доступ к колодам и указываем “куда целиться”.
-    /// </summary>
+    // -------------------- OWNER ACTIONS --------------------
+
+    private void ResetOwnerActions()
+    {
+        _ownerActions.placed = false;
+        _ownerActions.spelled = false;
+        _ownerActions.moved = false;
+    }
+
+    private void AfterOwnerActionProgress()
+    {
+        ApplyPhaseGates();
+
+        if (!(_ownerActions.placed && _ownerActions.spelled && _ownerActions.moved))
+            return;
+
+        _ownersDoneThisRound++;
+
+        if (initialRound)
+        {
+            if (_ownersDoneThisRound < 2)
+            {
+                // второй owner должен пройти Initial_EnemyPlace
+                BeginInitialEnemyPlace(ownerId: Other(currentOwnerId));
+            }
+            else
+            {
+                EndRound();
+            }
+        }
+        else
+        {
+            if (_ownersDoneThisRound < 2)
+            {
+                BeginNormalEnemySpellOpt(ownerId: Other(currentOwnerId));
+            }
+            else
+            {
+                EndRound();
+            }
+        }
+    }
+
+    // -------------------- NOTIFY FROM GAME --------------------
+    // Эти методы вызываются из DeckManager и Board3DView
+
+    public void NotifyTileDone(int actorPlayerId)
+    {
+        if (phase == Phase.GameOver) return;
+
+        // Initial: enemy place -> owner turn3
+        if (phase == Phase.Initial_EnemyPlace)
+        {
+            int expectedActor = Other(currentOwnerId);
+            if (actorPlayerId != expectedActor) return;
+
+            Debug.Log($"[TURN] Initial EnemyPlace done by P{actorPlayerId} into Owner=P{currentOwnerId}");
+            BeginInitialOwnerTurn3();
+            return;
+        }
+
+        // OwnerTurn3
+        if ((phase == Phase.Initial_OwnerTurn3 || phase == Phase.Normal_OwnerTurn3) && actorPlayerId == currentOwnerId)
+        {
+            if (_ownerActions.placed) return;
+            _ownerActions.placed = true;
+            Debug.Log($"[TURN] Owner=P{currentOwnerId} placed tile ?");
+            AfterOwnerActionProgress();
+        }
+    }
+
+    public void NotifySpellDone(int actorPlayerId)
+    {
+        if (phase == Phase.GameOver) return;
+
+        // Normal: enemy spell -> owner turn3
+        if (phase == Phase.Normal_EnemySpellOpt)
+        {
+            int expectedActor = Other(currentOwnerId);
+            if (actorPlayerId != expectedActor) return;
+
+            Debug.Log($"[TURN] EnemySpellOpt done by P{actorPlayerId} into Owner=P{currentOwnerId}");
+            BeginNormalOwnerTurn3();
+            return;
+        }
+
+        // OwnerTurn3
+        if ((phase == Phase.Initial_OwnerTurn3 || phase == Phase.Normal_OwnerTurn3) && actorPlayerId == currentOwnerId)
+        {
+            if (_ownerActions.spelled) return;
+            _ownerActions.spelled = true;
+            Debug.Log($"[TURN] Owner=P{currentOwnerId} cast spell ?");
+            AfterOwnerActionProgress();
+        }
+    }
+
+    public void NotifyMoveDone(int ownerPlayerId)
+    {
+        if (phase == Phase.GameOver) return;
+
+        if ((phase == Phase.Initial_OwnerTurn3 || phase == Phase.Normal_OwnerTurn3) && ownerPlayerId == currentOwnerId)
+        {
+            if (_ownerActions.moved) return;
+            _ownerActions.moved = true;
+            Debug.Log($"[TURN] Owner=P{currentOwnerId} moved mage ?");
+            AfterOwnerActionProgress();
+        }
+    }
+
+    // --- compat чтобы не править везде названия ---
+    public void NotifySpellResolved(int actorPlayerId) => NotifySpellDone(actorPlayerId);
+    public void NotifyDungeonResolved(int actorPlayerId) => NotifyTileDone(actorPlayerId);
+
+    // -------------------- MOVEMENT GATE --------------------
+
+    public bool CanMoveOnBoard(Board3DView b)
+    {
+        if (b == null) return false;
+        if (phase != Phase.Initial_OwnerTurn3 && phase != Phase.Normal_OwnerTurn3) return false;
+        if (GetP(currentOwnerId).board != b) return false;  // важно: сравниваем по ссылке на board
+        if (_ownerActions.moved) return false;
+        return true;
+    }
+
+    // -------------------- CRYSTALS API (for your TurnCrystal.cs) --------------------
+
+    private void ResetCrystalsIfActorChanged()
+    {
+        int actor = GetActorIdForCurrentPhase();
+        if (actor == 0) return;
+
+        if (actor != _activeActorId)
+        {
+            _activeActorId = actor;
+
+            if (crystalsSet != null)
+                crystalsSet.ResetAll();
+            else if (crystalsFallback != null)
+            {
+                foreach (var c in crystalsFallback)
+                    if (c != null) c.ResetCrystal();
+            }
+        }
+    }
+
+    public bool Crystal_SkipEnemySpellPhase()
+    {
+        if (phase == Phase.GameOver) return false;
+        if (phase != Phase.Normal_EnemySpellOpt) return false;
+
+        int actor = GetActorIdForCurrentPhase(); // enemy
+        int expected = Other(currentOwnerId);
+        if (actor != expected) return false;
+
+        Debug.Log($"[TURN] EnemySpell skipped by P{actor}");
+        BeginNormalOwnerTurn3();
+        return true;
+    }
+
+    public bool Crystal_SkipOwnerPlace()
+    {
+        if (phase == Phase.GameOver) return false;
+        if (phase != Phase.Initial_OwnerTurn3 && phase != Phase.Normal_OwnerTurn3) return false;
+
+        int actor = GetActorIdForCurrentPhase(); // owner
+        if (actor != currentOwnerId) return false;
+        if (_ownerActions.placed) return false;
+
+        _ownerActions.placed = true;
+        Debug.Log($"[TURN] Owner=P{currentOwnerId} skip PLACE ?");
+        AfterOwnerActionProgress();
+        return true;
+    }
+
+    public bool Crystal_SkipOwnerSpell()
+    {
+        if (phase == Phase.GameOver) return false;
+        if (phase != Phase.Initial_OwnerTurn3 && phase != Phase.Normal_OwnerTurn3) return false;
+
+        int actor = GetActorIdForCurrentPhase(); // owner
+        if (actor != currentOwnerId) return false;
+        if (_ownerActions.spelled) return false;
+
+        _ownerActions.spelled = true;
+        Debug.Log($"[TURN] Owner=P{currentOwnerId} skip SPELL ?");
+        AfterOwnerActionProgress();
+        return true;
+    }
+
+    public bool Crystal_SkipOwnerMove()
+    {
+        if (phase == Phase.GameOver) return false;
+        if (phase != Phase.Initial_OwnerTurn3 && phase != Phase.Normal_OwnerTurn3) return false;
+
+        int actor = GetActorIdForCurrentPhase(); // owner
+        if (actor != currentOwnerId) return false;
+        if (_ownerActions.moved) return false;
+
+        _ownerActions.moved = true;
+        Debug.Log($"[TURN] Owner=P{currentOwnerId} skip MOVE ?");
+        AfterOwnerActionProgress();
+        return true;
+    }
+
+    // -------------------- INPUT GATES --------------------
+
     private void ApplyPhaseGates()
     {
+        ResetCrystalsIfActorChanged();
+
         // по умолчанию всё выключено
-        p1.deck.SetInputEnabled(false, false);
-        p2.deck.SetInputEnabled(false, false);
+        if (p1.deck != null) { p1.deck.SetInputEnabled(false, false); p1.deck.SetTargetBoard(p1.board); }
+        if (p2.deck != null) { p2.deck.SetInputEnabled(false, false); p2.deck.SetTargetBoard(p2.board); }
 
-        // и по умолчанию “таргет” — своё поле
-        p1.deck.SetTargetBoard(p1.board);
-        p2.deck.SetTargetBoard(p2.board);
-
-        // В зависимости от фазы включаем только нужное
-        switch (phase)
+        if (phase == Phase.GameOver)
         {
-            // --- Первый цикл ---
-            // EnemyPlace: активен соперник, но таргет = поле владельца
-            case Phase.P1_EnemyPlace:
-                // игрок2 ставит тайл в поле игрок1
-                p2.deck.SetTargetBoard(p1.board);
-                p2.deck.SetInputEnabled(spells: false, dungeon: true);
-                break;
-
-            case Phase.P1_OwnerPlace:
-                p1.deck.SetTargetBoard(p1.board);
-                p1.deck.SetInputEnabled(spells: false, dungeon: true);
-                break;
-
-            case Phase.P1_OwnerSpell:
-                p1.deck.SetTargetBoard(p1.board);
-                p1.deck.SetInputEnabled(spells: true, dungeon: false);
-                break;
-
-            case Phase.P1_Move:
-                // ход мага — колоды неактивны
-                break;
-
-            case Phase.P2_EnemyPlace:
-                // игрок1 ставит тайл в поле игрок2
-                p1.deck.SetTargetBoard(p2.board);
-                p1.deck.SetInputEnabled(spells: false, dungeon: true);
-                break;
-
-            case Phase.P2_OwnerPlace:
-                p2.deck.SetTargetBoard(p2.board);
-                p2.deck.SetInputEnabled(spells: false, dungeon: true);
-                break;
-
-            case Phase.P2_OwnerSpell:
-                p2.deck.SetTargetBoard(p2.board);
-                p2.deck.SetInputEnabled(spells: true, dungeon: false);
-                break;
-
-            case Phase.P2_Move:
-                break;
-
-            // --- Обычный цикл ---
-            case Phase.P1_EnemySpellOpt:
-                // соперник2 может кастануть в подземелье игрока1
-                p2.deck.SetTargetBoard(p1.board);
-                p2.deck.SetInputEnabled(spells: true, dungeon: false);
-                break;
-
-            case Phase.P1_OwnerPlace1:
-                p1.deck.SetTargetBoard(p1.board);
-                p1.deck.SetInputEnabled(spells: false, dungeon: true);
-                break;
-
-            case Phase.P1_OwnerSpell2:
-                p1.deck.SetTargetBoard(p1.board);
-                p1.deck.SetInputEnabled(spells: true, dungeon: false);
-                break;
-
-            case Phase.P1_Move2:
-                break;
-
-            case Phase.P2_EnemySpellOpt:
-                p1.deck.SetTargetBoard(p2.board);
-                p1.deck.SetInputEnabled(spells: true, dungeon: false);
-                break;
-
-            case Phase.P2_OwnerPlace1:
-                p2.deck.SetTargetBoard(p2.board);
-                p2.deck.SetInputEnabled(spells: false, dungeon: true);
-                break;
-
-            case Phase.P2_OwnerSpell2:
-                p2.deck.SetTargetBoard(p2.board);
-                p2.deck.SetInputEnabled(spells: true, dungeon: false);
-                break;
-
-            case Phase.P2_Move2:
-                break;
+            Debug.Log("[TURN] GAME OVER.");
+            return;
         }
 
-        Debug.Log($"[TURN] Phase = {phase}. FirstToken = P{firstPlayerId}");
+        switch (phase)
+        {
+            case Phase.Initial_EnemyPlace:
+                {
+                    int actor = Other(currentOwnerId);
+                    var a = GetP(actor);
+                    var owner = GetP(currentOwnerId);
+
+                    a.deck.SetTargetBoard(owner.board);
+                    a.deck.SetInputEnabled(spells: false, dungeon: true);
+                    break;
+                }
+
+            case Phase.Initial_OwnerTurn3:
+            case Phase.Normal_OwnerTurn3:
+                {
+                    var owner = GetP(currentOwnerId);
+
+                    bool dungeonAllowed = !_ownerActions.placed;
+                    bool spellsAllowed = !_ownerActions.spelled;
+
+                    owner.deck.SetTargetBoard(owner.board);
+                    owner.deck.SetInputEnabled(spells: spellsAllowed, dungeon: dungeonAllowed);
+                    break;
+                }
+
+            case Phase.Normal_EnemySpellOpt:
+                {
+                    int actor = Other(currentOwnerId);
+                    var a = GetP(actor);
+                    var owner = GetP(currentOwnerId);
+
+                    a.deck.SetTargetBoard(owner.board);
+                    a.deck.SetInputEnabled(spells: true, dungeon: false);
+                    break;
+                }
+        }
+
+        Debug.Log($"[TURN] Phase={phase} | FirstToken=P{firstPlayerId} | Owner=P{currentOwnerId} | Actor=P{GetActorIdForCurrentPhase()} | " +
+                  $"OwnerActions: place={_ownerActions.placed} spell={_ownerActions.spelled} move={_ownerActions.moved} | initial={initialRound} done={_ownersDoneThisRound}");
     }
-
-    // Утилита: можно ли сейчас игроку трогать тип карт
-    public bool CanUseDungeon(int playerId) =>
-        (playerId == 1 ? p1.deck : p2.deck).IsDungeonEnabled();
-
-    public bool CanUseSpells(int playerId) =>
-        (playerId == 1 ? p1.deck : p2.deck).IsSpellsEnabled();
 }

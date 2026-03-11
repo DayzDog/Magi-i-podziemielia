@@ -119,12 +119,12 @@ public class CardDeckManager : MonoBehaviour
         _activeDungeonCards = new GameObject[dungeonSlots.Length];
     }
 
-    private void Start()
-    {
-        // в начале партии раздаЄм по 2 карты каждого типа
-        RefillSpellSlotsIfAllEmpty(force: true);
-        RefillDungeonSlotsIfAllEmpty(force: true);
-    }
+   // private void Start()
+   // {
+   //     // в начале партии раздаЄм по 2 карты каждого типа
+   //     RefillSpellSlotsIfAllEmpty(force: true);
+   //     RefillDungeonSlotsIfAllEmpty(force: true);
+   // }
 
     // ---------- —Ѕќ– ј » ѕ≈–≈“ј—ќ¬ ј  ќЋќƒ ----------
 
@@ -195,6 +195,7 @@ public class CardDeckManager : MonoBehaviour
         _spellDiscard.Add(card.spellType);
 
         HandleSpellCardUsed(card.gameObject);
+        TurnManager.I?.NotifySpellDone(ownerPlayerId);
     }
 
     /// <summary>
@@ -213,6 +214,7 @@ public class CardDeckManager : MonoBehaviour
         }
 
         HandleDungeonCardUsed(cardGO);
+        TurnManager.I?.NotifyTileDone(ownerPlayerId);
     }
 
     // ---------- ¬Ќ”“–≈ЌЌяя Ћќ√» ј ƒЋя «ј Ћ»ЌјЌ»… ----------
@@ -242,6 +244,7 @@ public class CardDeckManager : MonoBehaviour
         // удал€ем карту из слота
         Destroy(cardGO);
         _activeSpellCards[index] = null;
+        TurnManager.I?.NotifySpellResolved(ownerPlayerId);
 
         // провер€ем, остались ли ещЄ карты в слотах
         bool allEmpty = true;
@@ -255,10 +258,7 @@ public class CardDeckManager : MonoBehaviour
         }
 
         // Ќќ¬џ≈ карты выдаЄм только когда все слоты магии пусты
-        if (allEmpty)
-        {
-            RefillSpellSlotsIfAllEmpty(force: false);
-        }
+
     }
 
     private void RefillSpellSlotsIfAllEmpty(bool force)
@@ -379,6 +379,7 @@ public class CardDeckManager : MonoBehaviour
 
         Destroy(cardGO);
         _activeDungeonCards[index] = null;
+        TurnManager.I?.NotifyDungeonResolved(ownerPlayerId);
 
         bool allEmpty = true;
         for (int i = 0; i < _activeDungeonCards.Length; i++)
@@ -388,11 +389,6 @@ public class CardDeckManager : MonoBehaviour
                 allEmpty = false;
                 break;
             }
-        }
-
-        if (allEmpty)
-        {
-            RefillDungeonSlotsIfAllEmpty(force: false);
         }
     }
     public void RefillToFullNow()

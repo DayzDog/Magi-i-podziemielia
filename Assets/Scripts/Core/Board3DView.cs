@@ -4,6 +4,9 @@ using UnityEngine;
 
 public class Board3DView : MonoBehaviour
 {
+    [Header("Owner")]
+    public int ownerPlayerId = 1; // 1 или 2
+
     [Header("Tile defs (общие)")]
     public TileDefinition crossTile; // можно не использовать
 
@@ -542,6 +545,8 @@ public class Board3DView : MonoBehaviour
 
     public void OnMageClicked()
     {
+        if (TurnManager.I != null && !TurnManager.I.CanMoveOnBoard(this))
+            return;
         ClearHighlights();
 
         if (mageOnStart)
@@ -612,6 +617,9 @@ public class Board3DView : MonoBehaviour
 
     public void OnTileClicked(TileWorld tile)
     {
+        if (TurnManager.I != null && !TurnManager.I.CanMoveOnBoard(this))
+            return;
+
         if (tile == null || !tile.canMoveTarget)
             return;
 
@@ -633,9 +641,9 @@ public class Board3DView : MonoBehaviour
             Vector3 pos = anchor.position + Vector3.up * mageHeightOffset;
             mageGO.transform.position = pos;
         }
-
+        
         ClearHighlights();
-
+        TurnManager.I?.NotifyMoveDone(ownerPlayerId);
         // Проверяем: наступили ли на Sanctum, чтобы забрать Гримуар
         if (!mageHasGrimoire && sanctumRevealed && IsSanctumCell(x, y))
         {
@@ -652,9 +660,9 @@ public class Board3DView : MonoBehaviour
             Vector3 pos = startCellAnchor.position + Vector3.up * mageHeightOffset;
             mageGO.transform.position = pos;
         }
-
+        
         ClearHighlights();
-
+        TurnManager.I?.NotifyMoveDone(ownerPlayerId);
         // Проверка победы: маг вернулся на старт С ГРИМУАРОМ
         if (mageHasGrimoire && !GameWon)
         {
